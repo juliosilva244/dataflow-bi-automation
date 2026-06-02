@@ -56,6 +56,19 @@ def safe_session_list(key: str, valid_options: list[str]) -> None:
     st.session_state[key] = [value for value in current_values if value in valid_options]
 
 
+def get_page_title(active_page: str) -> str:
+    page_titles = {
+        "Painel": "Painel Executivo",
+        "Performance": "Desempenho Analítico",
+        "DimensaoSecundaria": "Análise por Produto",
+        "DimensaoPrincipal": "Análise por Loja",
+        "Relatorios": "Relatórios Executivos",
+        "Exportacoes": "Central de Exportações",
+    }
+
+    return page_titles.get(active_page, "Painel Executivo")
+
+
 def render_active_filters_summary(
     primary_values,
     secondary_values,
@@ -78,7 +91,6 @@ def render_active_filters_summary(
         )
 
     summary = " | ".join(active_filters) if active_filters else "Nenhum filtro avançado ativo"
-
     st.info(f"Filtros ativos: {summary}")
 
 
@@ -90,13 +102,64 @@ def get_schema_from_df(df: pd.DataFrame) -> dict:
         return {}
 
 
+def render_top_controls():
+    with st.container():
+        col_upload, col_periodo, col_debug = st.columns([3, 2, 1])
+
+        with col_upload:
+            arquivo_upload = st.file_uploader(
+                "📤 Carregar Excel ou CSV",
+                type=["xlsx", "xls", "csv"],
+                label_visibility="visible",
+            )
+
+        with col_periodo:
+            periodo = st.selectbox(
+                "🗓️ Período",
+                ["Tudo", "Últimos 7 dias", "Últimos 30 dias", "Últimos 90 dias", "Ano atual"],
+                key="selected_periodo",
+            )
+
+        with col_debug:
+            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+            st.toggle("Debug", key="debug_mode")
+
+    return arquivo_upload, periodo
+
+
+def render_header(origem_dados: str, schema: dict) -> None:
+    domain = schema.get("domain", "universal")
+    metric_column = schema.get("metric_column") or "métrica principal"
+    page_title = get_page_title(st.session_state.get("active_page", "Painel"))
+
+    render_html(
+        f"""
+        <div class="hero-block">
+            <div class="hero-eyebrow">DataFlow BI Automation</div>
+            <div class="main-title">{page_title}</div>
+            <div class="main-subtitle">
+                Plataforma inteligente de Business Intelligence para análise automática de planilhas,
+                geração de KPIs, visualizações executivas e insights estratégicos.
+                Domínio detectado: <strong>{domain}</strong>. Métrica principal:
+                <strong>{metric_column}</strong>.
+            </div>
+            <div class="source-card">
+                📁 Fonte de dados: <strong>{origem_dados}</strong>
+            </div>
+        </div>
+        """
+    )
+
+
 def render_filters(df: pd.DataFrame, schema: dict) -> pd.DataFrame:
     render_html(
         """
         <div class="section-header">
             <div>
                 <div class="section-title">Filtros Inteligentes</div>
-                <div class="section-subtitle">Segmentação analítica adaptada automaticamente à planilha carregada</div>
+                <div class="section-subtitle">
+                    Segmentação analítica adaptada automaticamente à planilha carregada.
+                </div>
             </div>
         </div>
         """
@@ -220,27 +283,6 @@ def render_filters(df: pd.DataFrame, schema: dict) -> pd.DataFrame:
     return df_filtrado
 
 
-def render_header(origem_dados: str, schema: dict) -> None:
-    domain = schema.get("domain", "universal")
-    metric_column = schema.get("metric_column") or "métrica principal"
-
-    render_html(
-        f"""
-        <div class="hero-block">
-            <div class="hero-eyebrow">Universal Business Intelligence Platform</div>
-            <div class="main-title">{st.session_state["active_page"]} Executivo</div>
-            <div class="main-subtitle">
-                Plataforma inteligente de automação analítica adaptada automaticamente ao domínio
-                <strong>{domain}</strong> e à métrica <strong>{metric_column}</strong>.
-            </div>
-            <div class="source-card">
-                📁 Fonte de dados: <strong>{origem_dados}</strong>
-            </div>
-        </div>
-        """
-    )
-
-
 def render_schema_warning(analytics_state: dict) -> None:
     quality = analytics_state.get("quality", {})
     missing = quality.get("colunas_ausentes", [])
@@ -359,7 +401,7 @@ def render_export_page(analytics_state: dict) -> None:
         """
         <div class="section-header">
             <div>
-                <div class="section-title">Exportações</div>
+                <div class="section-title">Central de Exportações</div>
                 <div class="section-subtitle">
                     Gere relatórios prontos para análise externa, envio ou arquivamento.
                 </div>
@@ -394,26 +436,7 @@ def render_export_page(analytics_state: dict) -> None:
 def main() -> None:
     init_session_state()
 
-    with st.container():
-        col_upload, col_periodo, col_debug = st.columns([3, 2, 1])
-
-        with col_upload:
-            arquivo_upload = st.file_uploader(
-                "📤 Carregar Excel ou CSV",
-                type=["xlsx", "xls", "csv"],
-                label_visibility="visible",
-            )
-
-        with col_periodo:
-            periodo = st.selectbox(
-                "🗓️ Período",
-                ["Tudo", "Últimos 7 dias", "Últimos 30 dias", "Últimos 90 dias", "Ano atual"],
-                key="selected_periodo",
-            )
-
-        with col_debug:
-            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-            st.toggle("Debug", key="debug_mode")
+    arquivo_upload, periodo = render_top_controls()
 
     df, origem_dados, erro = carregar_dados(
         arquivo_upload=arquivo_upload,
@@ -429,16 +452,16 @@ def main() -> None:
 
     render_sidebar(base_schema)
 
+    render_header(origem_dados, base_schema)
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
     df_filtrado = render_filters(df, base_schema)
     analytics_state = construir_analytics_state(df_filtrado)
 
-    schema = analytics_state.get("schema", {}) or base_schema
-
-    render_header(origem_dados, schema)
+    active_page = st.session_state["active_page"]
 
     st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-
-    active_page = st.session_state["active_page"]
 
     if active_page == "Painel":
         render_kpis(analytics_state)
