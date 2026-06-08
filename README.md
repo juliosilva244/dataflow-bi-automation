@@ -6,6 +6,14 @@ O **DataFlow BI Automation** foi desenvolvido como um projeto profissional de po
 
 ---
 
+## 🌐 Acesse o projeto online
+
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://dataflow-bi-automation-julio.streamlit.app)
+
+🔗 **Deploy:** https://dataflow-bi-automation-julio.streamlit.app
+
+---
+
 ## 📌 Visão geral
 
 Empresas pequenas, áreas administrativas e equipes operacionais ainda dependem muito de planilhas manuais para monitorar vendas, desempenho, produtos, lojas, volume, receita e indicadores.
