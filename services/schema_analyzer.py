@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import pandas as pd
@@ -49,72 +49,27 @@ class SchemaAnalysis:
 
 
 DOMAIN_KEYWORDS = {
-    "vendas": [
-        "venda", "vendas", "faturamento", "receita", "produto", "loja",
-        "pedido", "cliente", "sku", "ticket", "preco", "preço", "quantidade",
-    ],
-    "financeiro": [
-        "valor", "custo", "despesa", "receita", "lucro", "conta",
-        "centro de custo", "pagamento", "saldo", "financeiro",
-    ],
-    "rh": [
-        "funcionario", "funcionário", "colaborador", "departamento", "cargo",
-        "salario", "salário", "admissao", "admissão", "rh",
-    ],
-    "estoque": [
-        "estoque", "produto", "sku", "quantidade", "qtd", "entrada",
-        "saida", "saída", "armazem", "armazém",
-    ],
-    "projetos": [
-        "projeto", "tarefa", "status", "responsavel", "responsável",
-        "prazo", "horas", "sprint", "backlog",
-    ],
-    "crm": [
-        "cliente", "lead", "contato", "empresa", "oportunidade",
-        "pipeline", "negocio", "negócio", "vendedor",
-    ],
+    "vendas": ["venda", "vendas", "faturamento", "receita", "produto", "loja", "pedido", "sku", "ticket", "preco", "preço", "quantidade"],
+    "financeiro": ["valor", "custo", "despesa", "receita", "lucro", "conta", "centro de custo", "pagamento", "saldo", "financeiro", "boleto", "nota fiscal"],
+    "rh": ["funcionario", "funcionário", "colaborador", "departamento", "cargo", "salario", "salário", "admissao", "admissão", "rh", "turnover"],
+    "estoque": ["estoque", "produto", "sku", "quantidade", "qtd", "entrada", "saida", "saída", "armazem", "armazém", "lote"],
+    "projetos": ["projeto", "tarefa", "status", "responsavel", "responsável", "prazo", "horas", "sprint", "backlog", "entrega"],
+    "crm": ["cliente", "lead", "contato", "empresa", "oportunidade", "pipeline", "negocio", "negócio", "vendedor", "status"],
 }
 
-
 PRIMARY_METRIC_KEYWORDS = [
-    "faturamento", "receita", "valor total", "valor_total", "total venda",
-    "total_venda", "venda total", "venda_total", "total", "vendas",
-    "sales", "revenue", "amount", "valor",
+    "faturamento", "receita", "valor total", "valor_total", "total venda", "total_venda", "venda total", "venda_total",
+    "total", "vendas", "sales", "revenue", "amount", "valor", "custo", "despesa", "lucro", "saldo", "horas", "salario", "salário", "oportunidade", "pipeline", "deal",
 ]
 
-SECONDARY_METRIC_KEYWORDS = [
-    "lucro", "margem", "custo", "despesa", "saldo", "salario", "salário",
-    "horas", "volume", "quantidade", "qtd",
-]
-
-LOW_PRIORITY_METRIC_KEYWORDS = [
-    "preco unitario", "preço unitário", "preco_unitario", "valor unitario",
-    "valor_unitario", "unit price", "price", "preco", "preço",
-]
-
-DATE_KEYWORDS = [
-    "data", "date", "dt", "dia", "mes", "mês", "ano", "periodo",
-    "período", "emissao", "emissão", "admissao", "admissão",
-    "vencimento", "prazo", "created", "updated",
-]
-
-DIMENSION_KEYWORDS = [
-    "loja", "produto", "categoria", "cliente", "fornecedor", "departamento",
-    "centro", "conta", "cidade", "estado", "regiao", "região", "funcionario",
-    "funcionário", "colaborador", "cargo", "projeto", "status",
-    "responsavel", "responsável", "vendedor", "canal", "segmento", "grupo",
-    "tipo",
-]
-
-CATEGORY_KEYWORDS = [
-    "categoria", "category", "grupo", "group", "segmento", "segment",
-    "classe", "class", "tipo", "type", "familia", "família", "family",
-    "linha", "line", "departamento", "department", "status", "canal",
-]
-
-ID_KEYWORDS = [
-    "id", "codigo", "código", "cod", "uuid", "chave", "numero", "número",
-]
+SECONDARY_METRIC_KEYWORDS = ["quantidade", "qtd", "qtde", "volume", "ticket", "margem", "percentual", "taxa", "dias", "unidades"]
+LOW_PRIORITY_METRIC_KEYWORDS = ["id", "codigo", "código", "cod", "uuid", "numero", "número", "telefone", "cpf", "cnpj", "cep"]
+DATE_KEYWORDS = ["data", "date", "dt", "periodo", "período", "emissao", "emissão", "admissao", "admissão", "vencimento", "prazo", "created", "updated"]
+STRONG_DATE_KEYWORDS = ["data", "date", "dt", "emissao", "emissão", "admissao", "admissão", "vencimento", "created", "updated"]
+DURATION_KEYWORDS = ["dias", "dia", "idade", "tempo", "duracao", "duração", "dias no funil", "sla"]
+DIMENSION_KEYWORDS = ["loja", "produto", "categoria", "cliente", "fornecedor", "departamento", "centro", "conta", "cidade", "estado", "regiao", "região", "funcionario", "funcionário", "colaborador", "cargo", "projeto", "status", "responsavel", "responsável", "vendedor", "canal", "segmento", "grupo", "tipo", "empresa", "filial", "unidade"]
+CATEGORY_KEYWORDS = ["categoria", "category", "grupo", "segmento", "classe", "tipo", "familia", "família", "linha", "departamento", "status", "canal"]
+ID_KEYWORDS = ["id", "codigo", "código", "cod", "uuid", "chave", "numero", "número", "cpf", "cnpj", "telefone", "email"]
 
 
 def normalize_text(value: object) -> str:
@@ -130,21 +85,47 @@ def clean_numeric_series(series: pd.Series) -> pd.Series:
     if pd.api.types.is_numeric_dtype(series):
         return pd.to_numeric(series, errors="coerce")
 
-    cleaned = (
-        series.astype(str)
-        .str.replace("R$", "", regex=False)
-        .str.replace("%", "", regex=False)
-        .str.replace(".", "", regex=False)
-        .str.replace(",", ".", regex=False)
-        .str.replace(r"[^\d.\-]", "", regex=True)
-    )
-
+    raw = series.astype(str).str.strip()
+    cleaned = raw.str.replace("R$", "", regex=False).str.replace("%", "", regex=False).str.replace(" ", "", regex=False)
+    br_mask = cleaned.str.contains(r"^-?\d{1,3}(?:\.\d{3})+,\d+$", regex=True, na=False)
+    cleaned = cleaned.where(~br_mask, cleaned.str.replace(".", "", regex=False).str.replace(",", ".", regex=False))
+    comma_decimal_mask = cleaned.str.contains(r"^-?\d+,\d+$", regex=True, na=False)
+    cleaned = cleaned.where(~comma_decimal_mask, cleaned.str.replace(",", ".", regex=False))
+    cleaned = cleaned.str.replace(r"(?<=\d),(?=\d{3}(\D|$))", "", regex=True)
+    cleaned = cleaned.str.replace(r"[^\d.\-]", "", regex=True)
     return pd.to_numeric(cleaned, errors="coerce")
 
 
-def parse_date_series(series: pd.Series) -> pd.Series:
+def _has_date_like_values(series: pd.Series, sample_size: int = 25) -> bool:
+    sample = series.dropna().astype(str).head(sample_size)
+    if sample.empty:
+        return False
+    date_pattern = r"(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4})|(?:\d{4}[/-]\d{1,2}[/-]\d{1,2})"
+    return bool(sample.str.contains(date_pattern, regex=True, na=False).mean() >= 0.35)
+
+
+def parse_date_series(series: pd.Series, column_name: str | None = None) -> pd.Series:
     if pd.api.types.is_datetime64_any_dtype(series):
         return pd.to_datetime(series, errors="coerce")
+
+    normalized_name = normalize_text(column_name or series.name or "")
+
+    # Evita falso positivo: "Dias no Funil" / duração / idade não são datas.
+    if any(keyword in normalized_name for keyword in DURATION_KEYWORDS):
+        return pd.Series(pd.NaT, index=series.index)
+
+    has_date_keyword = any(keyword in normalized_name for keyword in DATE_KEYWORDS)
+    has_strong_date_keyword = any(keyword in normalized_name for keyword in STRONG_DATE_KEYWORDS)
+
+    if not has_date_keyword and not _has_date_like_values(series):
+        return pd.Series(pd.NaT, index=series.index)
+
+    if pd.api.types.is_numeric_dtype(series):
+        numeric = pd.to_numeric(series, errors="coerce")
+        excel_serial_ratio = numeric.between(20000, 60000).mean()
+        if not has_strong_date_keyword or excel_serial_ratio < 0.60:
+            return pd.Series(pd.NaT, index=series.index)
+        return pd.to_datetime(numeric, unit="D", origin="1899-12-30", errors="coerce")
 
     return pd.to_datetime(series, errors="coerce", dayfirst=True)
 
@@ -159,31 +140,8 @@ def confidence_from_score(score: float) -> float:
     return round(min(max(score / 100, 0), 1), 3)
 
 
-def _keyword_score(normalized_name: str) -> float:
-    score = 0.0
-
-    for keyword in PRIMARY_METRIC_KEYWORDS:
-        normalized_keyword = normalize_text(keyword)
-        if normalized_keyword == normalized_name:
-            score += 70
-        elif normalized_keyword in normalized_name:
-            score += 45
-
-    for keyword in SECONDARY_METRIC_KEYWORDS:
-        normalized_keyword = normalize_text(keyword)
-        if normalized_keyword == normalized_name:
-            score += 35
-        elif normalized_keyword in normalized_name:
-            score += 22
-
-    for keyword in LOW_PRIORITY_METRIC_KEYWORDS:
-        normalized_keyword = normalize_text(keyword)
-        if normalized_keyword == normalized_name:
-            score -= 28
-        elif normalized_keyword in normalized_name:
-            score -= 18
-
-    return score
+def _has_keyword(normalized_name: str, keywords: list[str]) -> bool:
+    return any(normalize_text(keyword) in normalized_name for keyword in keywords)
 
 
 def score_numeric_column(df: pd.DataFrame, column: str) -> tuple[float, pd.Series]:
@@ -195,25 +153,30 @@ def score_numeric_column(df: pd.DataFrame, column: str) -> tuple[float, pd.Serie
     normalized_name = normalize_text(column)
 
     score = 0.0
-
-    if valid_ratio >= 0.65:
-        score += valid_ratio * 40
-
-    if non_zero_ratio >= 0.25:
+    if valid_ratio >= 0.60:
+        score += valid_ratio * 42
+    if non_zero_ratio >= 0.20:
         score += non_zero_ratio * 12
 
-    score += _keyword_score(normalized_name)
+    for keyword in PRIMARY_METRIC_KEYWORDS:
+        normalized_keyword = normalize_text(keyword)
+        if normalized_keyword == normalized_name:
+            score += 52
+        elif normalized_keyword in normalized_name:
+            score += 30
 
-    if any(keyword in normalized_name for keyword in ["id", "codigo", "cod", "numero", "uuid"]):
-        score -= 45
+    for keyword in SECONDARY_METRIC_KEYWORDS:
+        normalized_keyword = normalize_text(keyword)
+        if normalized_keyword == normalized_name:
+            score += 22
+        elif normalized_keyword in normalized_name:
+            score += 12
 
-    if unique_count <= 2:
-        score -= 20
-
-    if unique_ratio > 0.95 and not any(
-        keyword in normalized_name
-        for keyword in ["faturamento", "receita", "valor", "total", "venda", "revenue", "amount"]
-    ):
+    if _has_keyword(normalized_name, LOW_PRIORITY_METRIC_KEYWORDS):
+        score -= 55
+    if unique_count <= 1:
+        score -= 25
+    if unique_ratio > 0.96 and not _has_keyword(normalized_name, ["valor", "total", "receita", "faturamento", "amount", "revenue", "sales", "vendas"]):
         score -= 18
 
     return max(score, 0.0), series
@@ -221,31 +184,20 @@ def score_numeric_column(df: pd.DataFrame, column: str) -> tuple[float, pd.Serie
 
 def score_date_column(df: pd.DataFrame, column: str) -> tuple[float, pd.Series]:
     normalized_name = normalize_text(column)
-
-    # Evita classificar números puros como datas por acidente.
-    # Pandas consegue converter inteiros para timestamps de 1970, o que gerava falsos positivos
-    # em colunas como Quantidade, Preço Unitário e Faturamento.
-    has_date_keyword = any(normalize_text(keyword) in normalized_name for keyword in DATE_KEYWORDS)
+    has_date_keyword = _has_keyword(normalized_name, DATE_KEYWORDS)
     if pd.api.types.is_numeric_dtype(df[column]) and not has_date_keyword:
-        empty_series = pd.Series(pd.NaT, index=df.index)
-        return 0.0, empty_series
+        return 0.0, pd.Series(pd.NaT, index=df.index)
 
-    series = parse_date_series(df[column])
+    series = parse_date_series(df[column], column)
     valid_ratio = float(series.notna().mean())
+    unique_count = int(series.nunique(dropna=True))
 
     score = 0.0
-
     if valid_ratio >= 0.55:
         score += valid_ratio * 55
-
-    for keyword in DATE_KEYWORDS:
-        normalized_keyword = normalize_text(keyword)
-        if normalized_keyword == normalized_name:
-            score += 35
-        elif normalized_keyword in normalized_name:
-            score += 15
-
-    if series.nunique(dropna=True) <= 1:
+    if has_date_keyword:
+        score += 35
+    if unique_count <= 1:
         score -= 15
 
     return max(score, 0.0), series
@@ -259,53 +211,40 @@ def score_dimension_column(df: pd.DataFrame, column: str) -> float:
     null_ratio = float(series.isna().mean())
     normalized_name = normalize_text(column)
 
+    numeric_score, _ = score_numeric_column(df, column)
+    date_score, _ = score_date_column(df, column)
+
     score = 0.0
-
-    if series.dtype == "object" or pd.api.types.is_string_dtype(series):
-        score += 20
-
-    if 2 <= unique_count <= max(2, total_rows * 0.65):
-        score += 30
-
-    if 0.01 <= unique_ratio <= 0.65:
-        score += 20
-
+    if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series) or unique_ratio <= 0.45:
+        score += 22
+    if 2 <= unique_count <= max(2, total_rows * 0.70):
+        score += 32
+    if 0.005 <= unique_ratio <= 0.70:
+        score += 18
     if null_ratio <= 0.35:
         score += 10
-
-    for keyword in DIMENSION_KEYWORDS:
-        normalized_keyword = normalize_text(keyword)
-        if normalized_keyword == normalized_name:
-            score += 35
-        elif normalized_keyword in normalized_name:
-            score += 15
-
-    for keyword in ID_KEYWORDS:
-        normalized_keyword = normalize_text(keyword)
-        if normalized_keyword == normalized_name or normalized_keyword in normalized_name:
-            score -= 20
-
-    if unique_ratio > 0.9:
+    if _has_keyword(normalized_name, DIMENSION_KEYWORDS):
+        score += 32
+    if _has_keyword(normalized_name, ID_KEYWORDS):
+        score -= 35
+    if unique_ratio > 0.90:
+        score -= 38
+    if numeric_score > 75:
+        score -= 30
+    if date_score > 55:
         score -= 35
 
     return max(score, 0.0)
 
 
 def score_category_column(df: pd.DataFrame, column: str) -> float:
-    base_score = score_dimension_column(df, column)
     normalized_name = normalize_text(column)
-
-    score = base_score
-
-    for keyword in CATEGORY_KEYWORDS:
-        normalized_keyword = normalize_text(keyword)
-        if normalized_keyword == normalized_name:
-            score += 45
-        elif normalized_keyword in normalized_name:
-            score += 25
-
+    base_score = score_dimension_column(df, column)
     unique_ratio = df[column].dropna().nunique() / max(len(df), 1)
 
+    score = base_score
+    if _has_keyword(normalized_name, CATEGORY_KEYWORDS):
+        score += 35
     if unique_ratio > 0.75:
         score -= 25
 
@@ -318,15 +257,25 @@ def classify_domain(df: pd.DataFrame) -> tuple[str, float]:
 
     for domain, keywords in DOMAIN_KEYWORDS.items():
         score = 0.0
-
         for keyword in keywords:
             normalized_keyword = normalize_text(keyword)
             if normalized_keyword in joined_columns:
                 score += 1.0
-
         scores[domain] = score
 
-    best_domain = max(scores, key=scores.get)
+    # Regras de desempate para bases reais: CRM costuma ter status/responsável,
+    # então não pode cair em "projetos" só por causa dessas colunas genéricas.
+    if "cliente" in joined_columns and ("oportunidade" in joined_columns or "lead" in joined_columns or "pipeline" in joined_columns):
+        scores["crm"] = scores.get("crm", 0) + 2.5
+    if "valor oportunidade" in joined_columns or "probabilidade" in joined_columns:
+        scores["crm"] = scores.get("crm", 0) + 1.5
+    if "projeto" in joined_columns or "tarefa" in joined_columns or "sprint" in joined_columns or "backlog" in joined_columns:
+        scores["projetos"] = scores.get("projetos", 0) + 2.0
+    if "faturamento" in joined_columns and ("loja" in joined_columns or "produto" in joined_columns):
+        scores["vendas"] = scores.get("vendas", 0) + 2.0
+
+    domain_priority = {"crm": 6, "vendas": 5, "financeiro": 4, "estoque": 3, "rh": 2, "projetos": 1, "generico": 0}
+    best_domain = sorted(scores.items(), key=lambda item: (item[1], domain_priority.get(item[0], 0)), reverse=True)[0][0]
     best_score = scores[best_domain]
     total_score = sum(scores.values())
 
@@ -337,122 +286,67 @@ def classify_domain(df: pd.DataFrame) -> tuple[str, float]:
     return best_domain, round(float(confidence), 3)
 
 
-def infer_column_dtype(series: pd.Series) -> str:
+def infer_column_dtype(series: pd.Series, column_name: str | None = None) -> str:
     if pd.api.types.is_datetime64_any_dtype(series):
         return "date"
 
     numeric_ratio = clean_numeric_series(series).notna().mean()
+    date_ratio = parse_date_series(series, column_name).notna().mean()
+    normalized = normalize_text(column_name or series.name or "")
 
-    if pd.api.types.is_numeric_dtype(series) and numeric_ratio >= 0.65:
-        return "numeric"
-
-    date_ratio = parse_date_series(series).notna().mean()
-
-    if date_ratio >= 0.65:
+    if date_ratio >= 0.65 or (date_ratio >= 0.45 and _has_keyword(normalized, DATE_KEYWORDS)):
         return "date"
-
-    if numeric_ratio >= 0.65:
+    if pd.api.types.is_numeric_dtype(series) or numeric_ratio >= 0.65:
         return "numeric"
-
     return "text"
 
 
 def choose_metric_column(numeric_scores: list[tuple[float, str]]) -> tuple[str | None, float]:
-    if not numeric_scores:
-        return None, 0.0
-
-    valid_scores = [(score, column) for score, column in numeric_scores if score >= 35]
-
+    valid_scores = [(score, column) for score, column in numeric_scores if score >= 32]
     if not valid_scores:
         return None, 0.0
 
-    exact_priority = [
-        "faturamento", "receita", "valor total", "total", "vendas",
-        "valor", "revenue", "amount",
-    ]
+    priority = ["faturamento", "receita", "valor total", "valor_total", "total", "vendas", "valor", "revenue", "amount", "custo", "despesa", "lucro", "saldo", "horas"]
+    for keyword in priority:
+        normalized_keyword = normalize_text(keyword)
+        matches = [(score, column) for score, column in valid_scores if normalized_keyword == normalize_text(column)]
+        if matches:
+            score, column = sorted(matches, reverse=True)[0]
+            return column, confidence_from_score(score)
 
-    for priority in exact_priority:
-        normalized_priority = normalize_text(priority)
+    for keyword in priority:
+        normalized_keyword = normalize_text(keyword)
+        matches = [(score, column) for score, column in valid_scores if normalized_keyword in normalize_text(column)]
+        if matches:
+            score, column = sorted(matches, reverse=True)[0]
+            return column, confidence_from_score(score)
 
-        for score, column in valid_scores:
-            normalized_column = normalize_text(column)
-            if normalized_column == normalized_priority:
-                return column, confidence_from_score(score)
-
-    contains_priority = [
-        "faturamento", "receita", "valor total", "total", "vendas",
-        "revenue", "amount",
-    ]
-
-    for priority in contains_priority:
-        normalized_priority = normalize_text(priority)
-
-        for score, column in valid_scores:
-            normalized_column = normalize_text(column)
-            if normalized_priority in normalized_column:
-                return column, confidence_from_score(score)
-
-    valid_scores.sort(reverse=True)
-    score, column = valid_scores[0]
+    score, column = sorted(valid_scores, reverse=True)[0]
     return column, confidence_from_score(score)
 
 
-def choose_top_column(scores: list[tuple[float, str]], min_score: float = 35) -> tuple[str | None, float]:
-    valid_scores = [(score, column) for score, column in scores if score >= min_score]
-
+def choose_top_column(scores: list[tuple[float, str]], excluded: set[str], min_score: float = 35) -> tuple[str | None, float]:
+    valid_scores = [(score, column) for score, column in scores if score >= min_score and column not in excluded]
     if not valid_scores:
         return None, 0.0
-
-    valid_scores.sort(reverse=True)
-    score, column = valid_scores[0]
+    score, column = sorted(valid_scores, reverse=True)[0]
     return column, confidence_from_score(score)
 
 
-def choose_secondary_metrics(
-    numeric_scores: list[tuple[float, str]],
-    metric_column: str | None,
-    limit: int = 4,
-) -> list[str]:
+def choose_secondary_metrics(numeric_scores: list[tuple[float, str]], metric_column: str | None, limit: int = 4) -> list[str]:
     metrics = []
-
     for score, column in sorted(numeric_scores, reverse=True):
-        if column == metric_column:
+        if column == metric_column or score < 32:
             continue
-
-        if score < 35:
-            continue
-
         metrics.append(column)
-
         if len(metrics) >= limit:
             break
-
     return metrics
 
 
 def analyze_schema(df: pd.DataFrame) -> SchemaAnalysis:
     if df is None or df.empty:
-        return SchemaAnalysis(
-            metric_column=None,
-            date_column=None,
-            primary_dimension=None,
-            secondary_dimension=None,
-            category_dimension=None,
-            secondary_metrics=[],
-            dimension_columns=[],
-            numeric_columns=[],
-            date_columns=[],
-            text_columns=[],
-            domain="vazio",
-            confidence=0.0,
-            metric_confidence=0.0,
-            date_confidence=0.0,
-            primary_dimension_confidence=0.0,
-            secondary_dimension_confidence=0.0,
-            category_dimension_confidence=0.0,
-            columns=[],
-            warnings=["A base está vazia ou não foi carregada."],
-        )
+        return SchemaAnalysis(None, None, None, None, None, [], [], [], [], [], "vazio", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, [], ["A base está vazia ou não foi carregada."])
 
     df = df.copy()
     df.columns = df.columns.astype(str).str.strip()
@@ -461,14 +355,13 @@ def analyze_schema(df: pd.DataFrame) -> SchemaAnalysis:
     date_scores: list[tuple[float, str]] = []
     dimension_scores: list[tuple[float, str]] = []
     category_scores: list[tuple[float, str]] = []
-
     semantic_columns: list[SemanticColumn] = []
     numeric_columns: list[str] = []
     date_columns: list[str] = []
     text_columns: list[str] = []
 
     for column in df.columns:
-        dtype = infer_column_dtype(df[column])
+        dtype = infer_column_dtype(df[column], column)
         unique_count = int(df[column].dropna().nunique())
         unique_ratio = float(unique_count / max(len(df), 1))
         null_ratio = float(df[column].isna().mean())
@@ -490,28 +383,14 @@ def analyze_schema(df: pd.DataFrame) -> SchemaAnalysis:
         else:
             text_columns.append(column)
 
-        best_role = max(
-            [
-                ("metric", numeric_score),
-                ("date", date_score),
-                ("dimension", dimension_score),
-                ("category", category_score),
-            ],
-            key=lambda item: item[1],
-        )
+        best_role = max([
+            ("metric", numeric_score),
+            ("date", date_score),
+            ("dimension", dimension_score),
+            ("category", category_score),
+        ], key=lambda item: item[1])
 
-        semantic_columns.append(
-            SemanticColumn(
-                name=column,
-                role=best_role[0],
-                confidence=confidence_from_score(best_role[1]),
-                dtype=dtype,
-                unique_count=unique_count,
-                unique_ratio=round(unique_ratio, 3),
-                null_ratio=round(null_ratio, 3),
-                sample_values=get_sample_values(df[column]),
-            )
-        )
+        semantic_columns.append(SemanticColumn(column, best_role[0], confidence_from_score(best_role[1]), dtype, unique_count, round(unique_ratio, 3), round(null_ratio, 3), get_sample_values(df[column])))
 
     numeric_scores.sort(reverse=True)
     date_scores.sort(reverse=True)
@@ -519,61 +398,66 @@ def analyze_schema(df: pd.DataFrame) -> SchemaAnalysis:
     category_scores.sort(reverse=True)
 
     metric_column, metric_confidence = choose_metric_column(numeric_scores)
-    date_column, date_confidence = choose_top_column(date_scores, min_score=35)
+    date_column, date_confidence = choose_top_column(date_scores, excluded={metric_column} if metric_column else set(), min_score=35)
 
-    valid_dimensions = [
-        column
-        for score, column in dimension_scores
-        if score >= 35 and column not in [metric_column, date_column]
-    ]
+    excluded = {value for value in [metric_column, date_column] if value}
+    valid_dimensions = [column for score, column in dimension_scores if score >= 35 and column not in excluded]
+
+    domain, domain_confidence = classify_domain(df)
+
+    def _dimension_priority(column: str) -> tuple[int, int]:
+        normalized = normalize_text(column)
+        domain_preferences = {
+            "crm": ["cliente", "status", "segmento", "canal", "responsavel", "vendedor", "cidade", "empresa"],
+            "vendas": ["loja", "produto", "categoria", "cliente", "vendedor", "cidade", "canal"],
+            "financeiro": ["centro de custo", "conta", "tipo", "categoria", "departamento", "fornecedor"],
+            "rh": ["departamento", "cargo", "funcionario", "colaborador", "cidade", "status"],
+            "estoque": ["produto", "sku", "categoria", "armazem", "unidade", "fornecedor"],
+            "projetos": ["projeto", "status", "responsavel", "departamento", "cliente", "sprint"],
+        }
+        preferred = domain_preferences.get(domain, ["centro de custo", "cliente", "empresa", "loja", "filial", "unidade", "produto", "departamento", "projeto", "responsavel", "vendedor", "cidade", "estado", "regiao"])
+        secondary = ["categoria", "grupo", "segmento", "tipo", "status", "canal"]
+        for index, item in enumerate(preferred):
+            if item in normalized:
+                return (3, 100 - index)
+        if any(item in normalized for item in secondary):
+            return (2, -len(normalized))
+        return (1, -len(normalized))
+
+    valid_dimensions = sorted(valid_dimensions, key=_dimension_priority, reverse=True)
 
     primary_dimension = valid_dimensions[0] if len(valid_dimensions) >= 1 else None
     secondary_dimension = valid_dimensions[1] if len(valid_dimensions) >= 2 else None
 
-    primary_dimension_confidence = 0.0
-    secondary_dimension_confidence = 0.0
+    primary_dimension_confidence = next((confidence_from_score(score) for score, column in dimension_scores if column == primary_dimension), 0.0)
+    secondary_dimension_confidence = next((confidence_from_score(score) for score, column in dimension_scores if column == secondary_dimension), 0.0)
 
-    for score, column in dimension_scores:
-        if column == primary_dimension:
-            primary_dimension_confidence = confidence_from_score(score)
-
-        if column == secondary_dimension:
-            secondary_dimension_confidence = confidence_from_score(score)
-
-    category_candidates = [
-        (score, column)
-        for score, column in category_scores
-        if score >= 45 and column not in [metric_column, date_column]
-    ]
-
+    category_candidates = [(score, column) for score, column in category_scores if score >= 45 and column not in excluded]
     if category_candidates:
-        category_candidates.sort(reverse=True)
-        category_score, category_dimension = category_candidates[0]
+        category_score, category_dimension = sorted(category_candidates, reverse=True)[0]
         category_dimension_confidence = confidence_from_score(category_score)
     else:
         category_dimension = None
         category_dimension_confidence = 0.0
 
+    if category_dimension in [primary_dimension, secondary_dimension]:
+        # Categoria pode ser igual à dimensão principal, mas não duplicamos a leitura.
+        category_dimension = None
+        category_dimension_confidence = 0.0
+
     secondary_metrics = choose_secondary_metrics(numeric_scores, metric_column)
 
-    domain, domain_confidence = classify_domain(df)
-
     warnings: list[str] = []
-
     if not metric_column:
         warnings.append("Nenhuma métrica principal foi detectada com confiança suficiente.")
-
     if not date_column:
         warnings.append("Nenhuma coluna de data foi detectada com confiança suficiente.")
-
     if not primary_dimension:
         warnings.append("Nenhuma dimensão principal foi detectada com confiança suficiente.")
-
-    if metric_confidence and metric_confidence < 0.6:
-        warnings.append("A métrica principal foi detectada com baixa confiança.")
-
-    if primary_dimension_confidence and primary_dimension_confidence < 0.6:
-        warnings.append("A dimensão principal foi detectada com baixa confiança.")
+    if metric_confidence and metric_confidence < 0.55:
+        warnings.append("A métrica principal foi detectada com confiança moderada/baixa.")
+    if primary_dimension_confidence and primary_dimension_confidence < 0.55:
+        warnings.append("A dimensão principal foi detectada com confiança moderada/baixa.")
 
     confidence_parts = [
         1.0 if metric_column else 0.0,
@@ -583,7 +467,6 @@ def analyze_schema(df: pd.DataFrame) -> SchemaAnalysis:
         metric_confidence,
         primary_dimension_confidence,
     ]
-
     confidence = round(sum(confidence_parts) / len(confidence_parts), 3)
 
     return SchemaAnalysis(

@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import re
 import unicodedata
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -8,87 +11,73 @@ import streamlit as st
 
 DEFAULT_FILE_PATH = Path("data/raw/vendas.xlsx")
 
+DATE_NAME_HINTS = [
+    # Evita falso positivo como "Dias no Funil" virando data 1970.
+    "data", "date", "dt", "periodo", "período",
+    "emissao", "emissão", "vencimento", "prazo", "created", "updated", "admissao", "admissão",
+]
 
-COLUMN_MAPPING = {
-    # Data
-    "data": "Data",
+STRONG_DATE_NAME_HINTS = [
+    "data", "date", "dt", "emissao", "emissão", "vencimento", "created", "updated", "admissao", "admissão"
+]
+
+DURATION_NAME_HINTS = [
+    "dias", "dia", "idade", "tempo", "duracao", "duração", "prazo em dias", "dias no funil", "sla"
+]
+
+NUMERIC_NAME_HINTS = [
+    "faturamento", "receita", "valor", "total", "venda", "vendas", "sales", "revenue", "amount",
+    "preco", "preço", "price", "custo", "despesa", "lucro", "margem", "saldo", "quantidade",
+    "qtd", "qtde", "volume", "horas", "salario", "salário", "ticket", "oportunidade", "pipeline", "deal",
+]
+
+NEGATIVE_ALLOWED_HINTS = [
+    "lucro", "margem", "saldo", "resultado", "variacao", "variação", "delta", "desvio",
+]
+
+CANONICAL_MAPPING = {
+    # Mantém compatibilidade com a base demo de vendas sem forçar planilhas genéricas.
     "data venda": "Data",
     "data_venda": "Data",
     "dt venda": "Data",
     "dt_venda": "Data",
-    "date": "Data",
     "sale date": "Data",
-    "created at": "Data",
-    "emissao": "Data",
     "pedido data": "Data",
-
-    # Loja
     "loja": "Loja",
     "store": "Loja",
-    "unidade": "Loja",
     "filial": "Loja",
-    "empresa": "Loja",
-    "ponto venda": "Loja",
+    "unidade": "Loja",
     "pdv": "Loja",
     "branch": "Loja",
-
-    # Produto
     "produto": "Produto",
     "product": "Produto",
-    "item": "Produto",
-    "sku": "Produto",
-    "descricao": "Produto",
-    "descrição": "Produto",
     "nome produto": "Produto",
     "produto nome": "Produto",
-
-    # Categoria
+    "sku": "SKU",
     "categoria": "Categoria",
     "category": "Categoria",
-    "grupo": "Categoria",
-    "departamento": "Categoria",
-    "linha": "Categoria",
-
-    # Quantidade
+    "grupo": "Grupo",
+    "departamento": "Departamento",
     "quantidade": "Quantidade",
     "qtd": "Quantidade",
     "qtde": "Quantidade",
     "quantity": "Quantidade",
     "volume": "Quantidade",
-    "unidades": "Quantidade",
-
-    # Preço unitário
     "preco unitario": "Preco_Unitario",
     "preço unitário": "Preco_Unitario",
-    "preco_unitario": "Preco_Unitario",
     "valor unitario": "Preco_Unitario",
     "valor_unitario": "Preco_Unitario",
     "unit price": "Preco_Unitario",
-    "price": "Preco_Unitario",
-
-    # Faturamento / Receita / Valor total
     "faturamento": "Faturamento",
-    "receita": "Faturamento",
-    "valor total": "Faturamento",
-    "valor_total": "Faturamento",
-    "total": "Faturamento",
-    "venda": "Faturamento",
-    "vendas": "Faturamento",
-    "sales": "Faturamento",
-    "revenue": "Faturamento",
-    "amount": "Faturamento",
-    "valor": "Faturamento",
+    "receita": "Receita",
+    "valor total": "Valor_Total",
+    "valor_total": "Valor_Total",
+    "revenue": "Receita",
+    "amount": "Valor",
 }
 
 
-TEXT_FALLBACK = {
-    "Loja": "Geral",
-    "Produto": "Não informado",
-    "Categoria": "Sem categoria",
-}
-
-
-def _normalize_text(value: object) -> str:
+def normalize_text(value: object) -> str:
     text = str(value).strip().lower()
     text = unicodedata.normalize("NFKD", text)
     text = "".join(char for char in text if not unicodedata.combining(char))
@@ -97,302 +86,275 @@ def _normalize_text(value: object) -> str:
     return text.strip()
 
 
-def _clean_money_series(series: pd.Series) -> pd.Series:
-    cleaned = (
-        series.astype(str)
-        .str.replace("R$", "", regex=False)
-        .str.replace(".", "", regex=False)
-        .str.replace(",", ".", regex=False)
-        .str.replace(r"[^\d.\-]", "", regex=True)
-    )
-    return pd.to_numeric(cleaned, errors="coerce")
+def _safe_column_name(name: object) -> str:
+    raw = str(name).strip()
+    if not raw or raw.lower().startswith("unnamed"):
+        return "Coluna"
+
+    normalized = normalize_text(raw)
+    mapped = CANONICAL_MAPPING.get(normalized)
+    if mapped:
+        return mapped
+
+    cleaned = re.sub(r"\s+", " ", raw)
+    cleaned = cleaned.replace("\n", " ").replace("\t", " ").strip()
+    return cleaned or "Coluna"
 
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-
-    normalized_columns = []
-    used_columns = set()
-
-    for original_col in df.columns:
-        normalized = _normalize_text(original_col)
-        mapped = COLUMN_MAPPING.get(normalized, str(original_col).strip())
-
-        if mapped in used_columns:
-            counter = 2
-            new_name = f"{mapped}_{counter}"
-            while new_name in used_columns:
-                counter += 1
-                new_name = f"{mapped}_{counter}"
-            mapped = new_name
-
-        used_columns.add(mapped)
-        normalized_columns.append(mapped)
-
-    df.columns = normalized_columns
-    return df
-
-
-def _find_numeric_columns(df: pd.DataFrame) -> list[str]:
-    numeric_candidates = []
+    used: dict[str, int] = {}
+    new_columns: list[str] = []
 
     for column in df.columns:
-        converted = _clean_money_series(df[column])
-        valid_ratio = converted.notna().mean()
+        base_name = _safe_column_name(column)
+        count = used.get(base_name, 0)
+        used[base_name] = count + 1
+        new_columns.append(base_name if count == 0 else f"{base_name}_{count + 1}")
 
-        if valid_ratio >= 0.6:
-            numeric_candidates.append(column)
-
-    return numeric_candidates
-
-
-def _auto_detect_revenue_column(df: pd.DataFrame) -> pd.DataFrame:
-    if "Faturamento" in df.columns:
-        return df
-
-    numeric_columns = _find_numeric_columns(df)
-
-    if not numeric_columns:
-        return df
-
-    priority_keywords = [
-        "faturamento",
-        "receita",
-        "valor",
-        "total",
-        "venda",
-        "sales",
-        "revenue",
-        "amount",
-    ]
-
-    scored = []
-
-    for column in numeric_columns:
-        normalized = _normalize_text(column)
-        score = 0
-
-        for keyword in priority_keywords:
-            if keyword in normalized:
-                score += 10
-
-        median_value = _clean_money_series(df[column]).median()
-        if pd.notna(median_value):
-            score += min(float(median_value), 1_000_000) / 1_000_000
-
-        scored.append((score, column))
-
-    scored.sort(reverse=True)
-    best_column = scored[0][1]
-
-    df["Faturamento"] = _clean_money_series(df[best_column])
+    df.columns = new_columns
     return df
 
 
-def _auto_detect_date_column(df: pd.DataFrame) -> pd.DataFrame:
-    if "Data" in df.columns:
-        df["Data"] = pd.to_datetime(df["Data"], errors="coerce", dayfirst=True)
-        return df
+def clean_numeric_series(series: pd.Series) -> pd.Series:
+    if pd.api.types.is_numeric_dtype(series):
+        return pd.to_numeric(series, errors="coerce")
 
-    best_column = None
-    best_ratio = 0
+    raw = series.astype(str).str.strip()
+    raw = raw.replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "null": pd.NA})
 
-    for column in df.columns:
-        converted = pd.to_datetime(df[column], errors="coerce", dayfirst=True)
-        ratio = converted.notna().mean()
+    cleaned = (
+        raw.str.replace("R$", "", regex=False)
+        .str.replace("%", "", regex=False)
+        .str.replace(" ", "", regex=False)
+    )
 
-        normalized = _normalize_text(column)
-        if any(term in normalized for term in ["data", "date", "dt"]):
-            ratio += 0.25
+    # Caso brasileiro: 1.234,56 -> 1234.56
+    br_mask = cleaned.str.contains(r"^-?\d{1,3}(?:\.\d{3})+,\d+$", regex=True, na=False)
+    cleaned_br = cleaned.where(~br_mask, cleaned.str.replace(".", "", regex=False).str.replace(",", ".", regex=False))
 
-        if ratio > best_ratio:
-            best_ratio = ratio
-            best_column = column
+    # Caso simples com vírgula decimal: 123,45 -> 123.45
+    comma_decimal_mask = cleaned_br.str.contains(r"^-?\d+,\d+$", regex=True, na=False)
+    cleaned_br = cleaned_br.where(~comma_decimal_mask, cleaned_br.str.replace(",", ".", regex=False))
 
-    if best_column is not None and best_ratio >= 0.45:
-        df["Data"] = pd.to_datetime(df[best_column], errors="coerce", dayfirst=True)
-    else:
-        df["Data"] = pd.Timestamp.today().normalize()
+    # Remove separadores residuais de milhar em números americanos mal misturados.
+    cleaned_br = cleaned_br.str.replace(r"(?<=\d),(?=\d{3}(\D|$))", "", regex=True)
+    cleaned_br = cleaned_br.str.replace(r"[^\d.\-]", "", regex=True)
 
-    return df
-
-
-def _auto_detect_dimension_column(
-    df: pd.DataFrame,
-    target_column: str,
-    keywords: list[str],
-    fallback_value: str,
-) -> pd.DataFrame:
-    if target_column in df.columns:
-        df[target_column] = df[target_column].astype(str).str.strip()
-        return df
-
-    candidates = []
-
-    for column in df.columns:
-        if column in ["Data", "Faturamento", "Quantidade", "Preco_Unitario"]:
-            continue
-
-        normalized = _normalize_text(column)
-        unique_ratio = df[column].nunique(dropna=True) / max(len(df), 1)
-
-        score = 0
-
-        for keyword in keywords:
-            if keyword in normalized:
-                score += 10
-
-        if 0 < unique_ratio <= 0.6:
-            score += 2
-
-        if df[column].dtype == "object":
-            score += 1
-
-        candidates.append((score, column))
-
-    candidates.sort(reverse=True)
-
-    if candidates and candidates[0][0] > 0:
-        df[target_column] = df[candidates[0][1]].astype(str).str.strip()
-    else:
-        df[target_column] = fallback_value
-
-    return df
+    return pd.to_numeric(cleaned_br, errors="coerce")
 
 
-def _prepare_quantity(df: pd.DataFrame) -> pd.DataFrame:
-    if "Quantidade" in df.columns:
-        df["Quantidade"] = _clean_money_series(df["Quantidade"])
-    else:
-        df["Quantidade"] = 1
-
-    return df
-
-
-def _prepare_revenue(df: pd.DataFrame) -> pd.DataFrame:
-    if "Faturamento" not in df.columns and {"Quantidade", "Preco_Unitario"}.issubset(df.columns):
-        quantidade = _clean_money_series(df["Quantidade"])
-        preco = _clean_money_series(df["Preco_Unitario"])
-        df["Faturamento"] = quantidade * preco
-
-    df = _auto_detect_revenue_column(df)
-
-    if "Faturamento" in df.columns:
-        df["Faturamento"] = _clean_money_series(df["Faturamento"])
-
-    return df
+def _has_date_like_values(series: pd.Series, sample_size: int = 25) -> bool:
+    sample = series.dropna().astype(str).head(sample_size)
+    if sample.empty:
+        return False
+    date_pattern = r"(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4})|(?:\d{4}[/-]\d{1,2}[/-]\d{1,2})"
+    return bool(sample.str.contains(date_pattern, regex=True, na=False).mean() >= 0.35)
 
 
-def validar_base_minima(df: pd.DataFrame) -> str | None:
-    if "Faturamento" not in df.columns:
-        return (
-            "Não consegui identificar uma coluna de valor/faturamento. "
-            "Use uma coluna como Faturamento, Receita, Valor Total, Total, Vendas ou Valor."
-        )
+def parse_date_series(series: pd.Series, column_name: str | None = None) -> pd.Series:
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return pd.to_datetime(series, errors="coerce")
 
-    if df["Faturamento"].dropna().empty:
-        return "A coluna de faturamento foi identificada, mas não possui valores numéricos válidos."
+    normalized = normalize_text(column_name or series.name or "")
 
-    return None
+    # Colunas de duração/idade/tempo não são datas, mesmo quando contêm a palavra "dia".
+    if any(hint in normalized for hint in DURATION_NAME_HINTS):
+        return pd.Series(pd.NaT, index=series.index)
+
+    has_date_hint = any(hint in normalized for hint in DATE_NAME_HINTS)
+    has_strong_date_hint = any(hint in normalized for hint in STRONG_DATE_NAME_HINTS)
+
+    if not has_date_hint and not _has_date_like_values(series):
+        return pd.Series(pd.NaT, index=series.index)
+
+    # Números simples como 13, 25, 70 não podem virar 1970-01-01.
+    # Só aceitamos número como data se parecer serial real do Excel e tiver nome forte de data.
+    if pd.api.types.is_numeric_dtype(series):
+        numeric = pd.to_numeric(series, errors="coerce")
+        excel_serial_ratio = numeric.between(20000, 60000).mean()
+        if not has_strong_date_hint or excel_serial_ratio < 0.60:
+            return pd.Series(pd.NaT, index=series.index)
+        return pd.to_datetime(numeric, unit="D", origin="1899-12-30", errors="coerce")
+
+    parsed = pd.to_datetime(series, errors="coerce", dayfirst=True)
+    return parsed
 
 
-def limpar_dados(df: pd.DataFrame):
+def _looks_numeric(column: str, series: pd.Series) -> bool:
+    normalized = normalize_text(column)
+    converted = clean_numeric_series(series)
+    valid_ratio = float(converted.notna().mean())
+
+    if valid_ratio >= 0.85:
+        return True
+
+    if valid_ratio >= 0.55 and any(hint in normalized for hint in NUMERIC_NAME_HINTS):
+        return True
+
+    return False
+
+
+def _looks_date(column: str, series: pd.Series) -> bool:
+    normalized = normalize_text(column)
+    has_date_hint = any(hint in normalized for hint in DATE_NAME_HINTS)
+
+    if pd.api.types.is_numeric_dtype(series) and not has_date_hint:
+        return False
+
+    parsed = parse_date_series(series, column)
+    valid_ratio = float(parsed.notna().mean())
+
+    if valid_ratio >= 0.80:
+        return True
+
+    if valid_ratio >= 0.45 and has_date_hint:
+        return True
+
+    return False
+
+
+def _clean_text_series(series: pd.Series) -> pd.Series:
+    return (
+        series.astype("string")
+        .fillna("Não informado")
+        .str.replace(r"\s+", " ", regex=True)
+        .str.strip()
+        .replace({"": "Não informado", "nan": "Não informado", "None": "Não informado"})
+    )
+
+
+def _drop_empty_rows_and_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
+    df = df.dropna(axis=0, how="all")
+    df = df.dropna(axis=1, how="all")
+
+    empty_cols = []
+    for column in df.columns:
+        values = df[column].astype(str).str.strip().str.lower()
+        if values.isin(["", "nan", "none", "null"]).all():
+            empty_cols.append(column)
+
+    if empty_cols:
+        df = df.drop(columns=empty_cols)
+
+    return df
+
+
+def limpar_dados(df: pd.DataFrame) -> tuple[pd.DataFrame | None, str | None]:
+    if df is None or df.empty:
+        return None, "A base enviada está vazia."
+
+    df = _drop_empty_rows_and_columns(df)
     df = normalize_columns(df)
 
-    df = _auto_detect_date_column(df)
-    df = _auto_detect_dimension_column(
-        df,
-        "Loja",
-        ["loja", "store", "filial", "unidade", "empresa", "pdv"],
-        TEXT_FALLBACK["Loja"],
-    )
-    df = _auto_detect_dimension_column(
-        df,
-        "Produto",
-        ["produto", "product", "item", "sku", "descricao"],
-        TEXT_FALLBACK["Produto"],
-    )
+    if df.empty or len(df.columns) == 0:
+        return None, "A base não possui linhas ou colunas válidas."
 
-    if "Categoria" not in df.columns:
-        df["Categoria"] = TEXT_FALLBACK["Categoria"]
+    for column in list(df.columns):
+        if _looks_date(column, df[column]):
+            df[column] = parse_date_series(df[column], column)
+        elif _looks_numeric(column, df[column]):
+            df[column] = clean_numeric_series(df[column])
+        elif pd.api.types.is_object_dtype(df[column]) or pd.api.types.is_string_dtype(df[column]):
+            df[column] = _clean_text_series(df[column])
 
-    df = _prepare_quantity(df)
-    df = _prepare_revenue(df)
+    # Compatibilidade útil: cria Faturamento apenas quando Quantidade e Preco_Unitario existem de verdade.
+    if "Faturamento" not in df.columns and {"Quantidade", "Preco_Unitario"}.issubset(df.columns):
+        quantidade = clean_numeric_series(df["Quantidade"]).fillna(0)
+        preco = clean_numeric_series(df["Preco_Unitario"]).fillna(0)
+        computed = quantidade * preco
+        if computed.notna().any() and float(computed.sum()) > 0:
+            df["Faturamento"] = computed
 
-    erro = validar_base_minima(df)
-    if erro:
-        return None, erro
+    numeric_columns = [column for column in df.columns if pd.api.types.is_numeric_dtype(df[column])]
+    if not numeric_columns:
+        return None, (
+            "Não consegui identificar nenhuma coluna numérica analisável. "
+            "Inclua pelo menos uma coluna como Valor, Receita, Faturamento, Quantidade, Custo ou Total."
+        )
 
-    df["Data"] = pd.to_datetime(df["Data"], errors="coerce", dayfirst=True)
-    df["Quantidade"] = pd.to_numeric(df["Quantidade"], errors="coerce").fillna(1)
-    df["Faturamento"] = pd.to_numeric(df["Faturamento"], errors="coerce")
-
-    df["Loja"] = df["Loja"].fillna(TEXT_FALLBACK["Loja"]).astype(str).str.strip()
-    df["Produto"] = df["Produto"].fillna(TEXT_FALLBACK["Produto"]).astype(str).str.strip()
-    df["Categoria"] = df["Categoria"].fillna(TEXT_FALLBACK["Categoria"]).astype(str).str.strip()
-
-    df = df.dropna(subset=["Faturamento"])
-    df = df[df["Faturamento"] >= 0]
-    df = df[df["Quantidade"] > 0]
-
-    if df["Data"].isna().all():
-        df["Data"] = pd.Timestamp.today().normalize()
-    else:
-        df["Data"] = df["Data"].fillna(df["Data"].max())
+    # Remove linhas totalmente inúteis sem exigir modelo de vendas.
+    df = df.dropna(axis=0, how="all").reset_index(drop=True)
 
     if df.empty:
         return None, "A base não possui dados válidos após a limpeza."
 
-    return df.reset_index(drop=True), None
+    return df, None
 
 
-@st.cache_data(ttl=3600)
-def ler_arquivo_upload(arquivo_upload):
+@st.cache_data(ttl=3600, show_spinner=False)
+def ler_arquivo_upload(arquivo_upload: Any) -> pd.DataFrame:
     nome_arquivo = arquivo_upload.name.lower()
 
-    if nome_arquivo.endswith(".xlsx") or nome_arquivo.endswith(".xls"):
+    if nome_arquivo.endswith((".xlsx", ".xls")):
         return pd.read_excel(arquivo_upload)
 
     if nome_arquivo.endswith(".csv"):
         try:
-            return pd.read_csv(arquivo_upload, sep=None, engine="python")
+            return pd.read_csv(arquivo_upload, sep=None, engine="python", encoding="utf-8")
+        except UnicodeDecodeError:
+            arquivo_upload.seek(0)
+            return pd.read_csv(arquivo_upload, sep=None, engine="python", encoding="latin1")
         except Exception:
             arquivo_upload.seek(0)
-            return pd.read_csv(arquivo_upload, sep=";")
+            return pd.read_csv(arquivo_upload, sep=";", encoding="utf-8")
 
     raise ValueError("Formato de arquivo não suportado. Envie apenas .xlsx, .xls ou .csv.")
 
 
+def _find_best_date_column(df: pd.DataFrame) -> str | None:
+    best_column = None
+    best_score = 0.0
+
+    for column in df.columns:
+        parsed = parse_date_series(df[column], column)
+        valid_ratio = float(parsed.notna().mean())
+        normalized = normalize_text(column)
+        score = valid_ratio + (0.25 if any(hint in normalized for hint in DATE_NAME_HINTS) else 0)
+
+        if score > best_score and valid_ratio >= 0.35:
+            best_score = score
+            best_column = column
+
+    return best_column
+
+
 def aplicar_filtro_periodo(df: pd.DataFrame, periodo: str) -> pd.DataFrame:
-    if periodo == "Tudo" or "Data" not in df.columns:
+    if periodo == "Tudo" or df is None or df.empty:
         return df
 
-    data_maxima = pd.to_datetime(df["Data"], errors="coerce").max()
+    date_column = _find_best_date_column(df)
+    if not date_column:
+        return df
+
+    filtered_df = df.copy()
+    filtered_df[date_column] = parse_date_series(filtered_df[date_column], date_column)
+    data_maxima = filtered_df[date_column].max()
 
     if pd.isna(data_maxima):
         return df
 
     if periodo == "Últimos 7 dias":
         limite = data_maxima - pd.Timedelta(days=7)
-        return df[df["Data"] >= limite]
+        return filtered_df[filtered_df[date_column] >= limite]
 
     if periodo == "Últimos 30 dias":
         limite = data_maxima - pd.Timedelta(days=30)
-        return df[df["Data"] >= limite]
+        return filtered_df[filtered_df[date_column] >= limite]
 
     if periodo == "Últimos 90 dias":
         limite = data_maxima - pd.Timedelta(days=90)
-        return df[df["Data"] >= limite]
+        return filtered_df[filtered_df[date_column] >= limite]
 
     if periodo == "Ano atual":
-        return df[df["Data"].dt.year == data_maxima.year]
+        return filtered_df[filtered_df[date_column].dt.year == data_maxima.year]
 
     return df
 
 
-@st.cache_data(ttl=3600)
-def carregar_dados(arquivo_upload=None, periodo="Tudo"):
+@st.cache_data(ttl=3600, show_spinner=False)
+def carregar_dados(arquivo_upload=None, periodo: str = "Tudo"):
     try:
         if arquivo_upload is not None:
             df = ler_arquivo_upload(arquivo_upload)
@@ -402,16 +364,19 @@ def carregar_dados(arquivo_upload=None, periodo="Tudo"):
             origem = "Arquivo padrão do sistema"
 
         df, erro_limpeza = limpar_dados(df)
-
         if erro_limpeza:
             return None, origem, erro_limpeza
 
         df = aplicar_filtro_periodo(df, periodo)
 
-        if df.empty:
+        if df is None or df.empty:
             return None, origem, "Não existem dados para o período selecionado."
 
-        df = df.sort_values("Data").reset_index(drop=True)
+        date_column = _find_best_date_column(df)
+        if date_column and date_column in df.columns:
+            df = df.sort_values(date_column).reset_index(drop=True)
+        else:
+            df = df.reset_index(drop=True)
 
         return df, origem, None
 

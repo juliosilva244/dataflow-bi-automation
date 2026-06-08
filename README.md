@@ -1,165 +1,138 @@
 # 🚀 DataFlow BI Automation
 
-Professional Business Intelligence and Analytics Platform built with Python, Streamlit and Plotly.
-
-DataFlow BI Automation is a modern BI solution designed to transform Excel and CSV files into interactive dashboards, automated KPIs, business insights and analytical reports.
+Plataforma profissional de Business Intelligence em Python para transformar planilhas Excel/CSV em dashboards executivos, KPIs automáticos, análise de schema, insights e relatórios exportáveis.
 
 ---
 
-## 📊 Overview
+## 📊 Visão geral
 
-DataFlow BI Automation helps users explore, analyze and visualize business data through an intuitive interface.
+O **DataFlow BI Automation** analisa bases tabulares automaticamente, identifica a métrica principal, detecta dimensões relevantes, gera KPIs, cria gráficos interativos e permite exportação em Excel/PDF.
 
-The platform automatically identifies metrics, generates KPIs, creates interactive visualizations and provides actionable insights for decision-making.
-
----
-
-## ✨ Features
-
-### 📈 KPI Monitoring
-
-* Automated KPI generation
-* Revenue analysis
-* Performance tracking
-* Business metrics overview
-
-### 📊 Interactive Dashboards
-
-* Dynamic charts
-* Revenue evolution analysis
-* Product performance analysis
-* Store performance analysis
-
-### 📁 File Analysis
-
-* Excel support (.xlsx)
-* CSV support
-* Automatic data loading
-* Intelligent data processing
-
-### 🤖 AI-Powered Insights
-
-* Automated business insights
-* Trend identification
-* Performance analysis
-* Data-driven recommendations
-
-### 📋 Reporting
-
-* Executive dashboards
-* Data summaries
-* Export-ready reports
+O projeto foi desenhado para portfólio profissional em Dados/BI, com foco em automação analítica, Streamlit, Pandas, Plotly e integração opcional com IA via Groq.
 
 ---
 
-## 🛠 Tech Stack
+## ✨ Recursos
 
-* Python
-* Streamlit
-* Pandas
-* Plotly
-* OpenPyXL
-* NumPy
-* Groq API (Optional)
+- Upload de arquivos `.xlsx`, `.xls` e `.csv`
+- Base padrão de demonstração
+- Detecção automática de schema
+- Identificação de:
+  - métrica principal
+  - coluna de data
+  - dimensão principal
+  - dimensão secundária
+  - categoria
+  - domínio provável da base
+- KPIs executivos automáticos
+- Gráficos interativos com Plotly
+- Insights automáticos sem depender de API externa
+- AI BI Assistant opcional com Groq
+- Exportação Excel
+- Exportação PDF executivo
+- Sidebar com navegação real
+- Modo debug para inspeção técnica
 
 ---
 
-## 📂 Project Structure
+## 🛠 Stack
+
+- Python
+- Streamlit
+- Pandas
+- Plotly
+- OpenPyXL
+- ReportLab
+- python-dotenv
+- Groq API opcional
+
+---
+
+## 📂 Estrutura principal
 
 ```text
 dataflow-bi-automation/
-│
 ├── app.py
 ├── main.py
 ├── requirements.txt
 ├── README.md
-│
+├── .env.example
 ├── assets/
 │   └── styles.py
-│
 ├── components/
+│   ├── ai_assistant.py
 │   ├── charts.py
+│   ├── chat_message.py
 │   ├── insights.py
 │   ├── kpis.py
 │   ├── sidebar.py
-│   ├── tables.py
-│   └── ai_assistant.py
-│
+│   └── tables.py
 ├── services/
 │   ├── analytics.py
-│   ├── loader.py
+│   ├── exporter.py
 │   ├── formatter.py
+│   ├── insight_engine.py
+│   ├── llm_router.py
+│   ├── loader.py
 │   ├── metrics_engine.py
-│   └── schema_analyzer.py
-│
+│   ├── schema_analyzer.py
+│   └── providers/
+│       └── groq_provider.py
 └── data/
     └── raw/
+        └── vendas.xlsx
 ```
 
-## 🚀 Getting Started
+---
 
-### Clone Repository
+## 🚀 Como rodar
 
-```bash
-git clone https://github.com/juliosilva244/dataflow-bi-automation.git
-```
-
-### Enter Project Folder
-
-```bash
-cd dataflow-bi-automation
-```
-
-### Install Dependencies
+### 1. Instale as dependências
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Run Application
+### 2. Rode o app
 
 ```bash
 streamlit run app.py
 ```
 
----
+Ou no Windows:
 
-## 📸 Dashboard Preview
-
-Add screenshots of:
-
-* Main Dashboard
-* KPI Cards
-* Interactive Charts
-* Insights Panel
-* AI Assistant
+```bash
+run.bat
+```
 
 ---
 
-## 🎯 Use Cases
+## 🤖 Ativar IA opcional
 
-* Business Intelligence
-* Sales Analysis
-* Revenue Monitoring
-* Executive Reporting
-* Data Exploration
-* KPI Tracking
-* Analytics Automation
+Crie um arquivo `.env` na raiz do projeto com base no `.env.example`:
 
----
+```env
+GROQ_API_KEY=sua_chave_aqui
+GROQ_MODEL=llama-3.1-8b-instant
+```
 
-## 👨‍💻 Author
-
-Jose Julio Silva
-
-LinkedIn:
-https://www.linkedin.com/in/jose-julio-analytics
-
-GitHub:
-https://github.com/juliosilva244
+Sem a chave, o dashboard continua funcionando normalmente com os insights automáticos locais.
 
 ---
 
-## 📄 License
+## 📌 Observação técnica
 
-This project is available for educational, portfolio and professional demonstration purposes.
+A versão atual usa um núcleo mais universal: o carregador preserva as colunas originais da planilha e o `schema_analyzer.py` decide a semântica dos dados. Isso evita forçar toda base para o modelo fixo de vendas.
+
+---
+
+## 👨‍💻 Autor
+
+Júlio Silva  
+GitHub: https://github.com/juliosilva244
+
+---
+
+## 📄 Licença
+
+Projeto disponível para fins educacionais, demonstração profissional e portfólio.
