@@ -37,7 +37,29 @@ O projeto foi pensado para:
 ---
 
 ## ✨ Principais recursos
+---
 
+## 🖼️ Demonstração visual
+
+### Painel executivo
+
+![Painel executivo](docs/images/dashboard-home.png)
+
+### KPIs automáticos
+
+![KPIs automáticos](docs/images/dashboard-kpis.png)
+
+### Gráficos e rankings
+
+![Gráficos e rankings](docs/images/dashboard-charts.png)
+
+### Insights automáticos
+
+![Insights automáticos](docs/images/dashboard-insights.png)
+
+### Exportações Excel e PDF
+
+![Exportações Excel e PDF](docs/images/dashboard-exports.png)
 * Upload de arquivos `.xlsx`, `.xls` e `.csv`
 * Base padrão de demonstração
 * Detecção automática de schema
