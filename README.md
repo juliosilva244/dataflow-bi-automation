@@ -36,9 +36,6 @@ O projeto foi pensado para:
 
 ---
 
-## ✨ Principais recursos
----
-
 ## 🖼️ Demonstração visual
 
 ### Painel executivo
@@ -60,6 +57,11 @@ O projeto foi pensado para:
 ### Exportações Excel e PDF
 
 ![Exportações Excel e PDF](docs/images/dashboard-exports.png)
+
+---
+
+## ✨ Principais recursos
+
 * Upload de arquivos `.xlsx`, `.xls` e `.csv`
 * Base padrão de demonstração
 * Detecção automática de schema
