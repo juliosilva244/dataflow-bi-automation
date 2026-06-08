@@ -177,7 +177,7 @@ def table_dynamic_dimension(
     st.markdown(f"### {title}")
     st.dataframe(
         _format_table(summary),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -217,7 +217,7 @@ def table_numeric_summary(df: pd.DataFrame, schema: dict):
     st.markdown("### Resumo Numérico")
     st.dataframe(
         _format_table(summary),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -249,7 +249,7 @@ def table_schema_summary(schema: dict):
     st.markdown("### Leitura Automática do Schema")
     st.dataframe(
         _format_table(summary),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -267,7 +267,7 @@ def table_raw_data(df: pd.DataFrame):
     st.markdown("### Base Completa")
     st.dataframe(
         df,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 

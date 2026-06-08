@@ -170,7 +170,7 @@ def render_revenue_chart(chart_df: pd.DataFrame, metric_label: str = "Métrica")
 
     st.plotly_chart(
         fig,
-        use_container_width=True,
+        width="stretch",
         config={"displayModeBar": False, "responsive": True},
     )
 
@@ -234,7 +234,7 @@ def render_dimension_chart(
 
     st.plotly_chart(
         fig,
-        use_container_width=True,
+        width="stretch",
         config={"displayModeBar": False, "responsive": True},
     )
 
@@ -344,7 +344,7 @@ def render_category_donut_chart(chart_df: pd.DataFrame, metric_label: str = "Mé
 
     st.plotly_chart(
         fig,
-        use_container_width=True,
+        width="stretch",
         config={"displayModeBar": False, "responsive": True},
     )
 

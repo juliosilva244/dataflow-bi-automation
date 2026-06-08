@@ -34,19 +34,19 @@ def render_quick_actions(schema: dict) -> str | None:
     selected = None
 
     with col1:
-        if st.button("Resumo", use_container_width=True, key="ai_btn_summary"):
+        if st.button("Resumo", width="stretch", key="ai_btn_summary"):
             selected = "gere um resumo executivo objetivo desta base"
     with col2:
-        if st.button("Risco", use_container_width=True, key="ai_btn_risk"):
+        if st.button("Risco", width="stretch", key="ai_btn_risk"):
             selected = "qual é o maior risco detectável pelos dados?"
     with col3:
-        if st.button(f"Top {primary_label}", use_container_width=True, key="ai_btn_primary"):
+        if st.button(f"Top {primary_label}", width="stretch", key="ai_btn_primary"):
             selected = f"analise a performance da dimensão {primary_label}"
     with col4:
-        if st.button(f"Top {secondary_label}", use_container_width=True, key="ai_btn_secondary"):
+        if st.button(f"Top {secondary_label}", width="stretch", key="ai_btn_secondary"):
             selected = f"analise a performance da dimensão {secondary_label}"
     with col5:
-        if st.button("Limpar", use_container_width=True, key="ai_btn_clear"):
+        if st.button("Limpar", width="stretch", key="ai_btn_clear"):
             clear_ai_history()
             st.rerun()
 
@@ -79,7 +79,7 @@ def render_ai_assistant(analytics_state: dict) -> None:
             placeholder="Ex.: quais são os riscos e próximas ações?",
             key="ai_manual_question_input",
         )
-        send_manual_question = st.button("Enviar pergunta para IA", key="ai_send_manual_question", use_container_width=True)
+        send_manual_question = st.button("Enviar pergunta para IA", key="ai_send_manual_question", width="stretch")
 
         question = quick_question or (manual_question.strip() if send_manual_question and manual_question.strip() else None)
 

@@ -46,7 +46,7 @@ def render_sidebar(schema: dict | None = None):
             if st.button(
                 page_name,
                 key=f"nav_{page_id}",
-                use_container_width=True,
+                width="stretch",
                 type="primary" if is_active else "secondary",
             ):
                 st.session_state["active_page"] = page_id

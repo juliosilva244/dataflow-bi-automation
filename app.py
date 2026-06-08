@@ -171,7 +171,7 @@ def render_filters(df: pd.DataFrame, schema: dict) -> pd.DataFrame:
 
     with col4:
         st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-        if st.button("🔄 Resetar", use_container_width=True):
+        if st.button("🔄 Resetar", width="stretch"):
             st.session_state["selected_primary_dimension"] = []
             st.session_state["selected_secondary_dimension"] = []
             if "selected_date_range" in st.session_state:
@@ -247,10 +247,10 @@ def render_debug_panel(df_filtrado: pd.DataFrame, analytics_state: dict) -> None
     st.divider()
     st.subheader("🧪 DEBUG — Payload Universal")
     st.write("DEBUG — DataFrame filtrado")
-    st.dataframe(df_filtrado, use_container_width=True)
+    st.dataframe(df_filtrado, width="stretch")
     for key in ["primary_dimension_summary", "secondary_dimension_summary", "revenue_by_month", "revenue_by_category"]:
         st.write(f"DEBUG — {key}")
-        st.dataframe(charts.get(key, pd.DataFrame()), use_container_width=True)
+        st.dataframe(charts.get(key, pd.DataFrame()), width="stretch")
     st.write("DEBUG — Schema")
     st.json(analytics_state.get("schema", {}))
 
@@ -287,10 +287,10 @@ def render_export_page(analytics_state: dict) -> None:
     col_excel, col_pdf = st.columns(2)
     with col_excel:
         excel_file = gerar_excel(analytics_state)
-        st.download_button("📥 Baixar Relatório Excel", data=excel_file, file_name="relatorio_dataflow.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        st.download_button("📥 Baixar Relatório Excel", data=excel_file, file_name="relatorio_dataflow.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch")
     with col_pdf:
         pdf_file = gerar_pdf(analytics_state)
-        st.download_button("📄 Baixar Relatório PDF", data=pdf_file, file_name="relatorio_dataflow.pdf", mime="application/pdf", use_container_width=True)
+        st.download_button("📄 Baixar Relatório PDF", data=pdf_file, file_name="relatorio_dataflow.pdf", mime="application/pdf", width="stretch")
 
 
 def render_ai_if_enabled(analytics_state: dict) -> None:
