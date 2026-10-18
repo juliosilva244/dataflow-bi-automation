@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from io import BytesIO
+from xml.sax.saxutils import escape as escape_xml
 from typing import Any
 
 import pandas as pd
@@ -299,6 +300,13 @@ def _rename_columns_for_display(df: pd.DataFrame) -> pd.DataFrame:
     return renamed
 
 
+def _neutralize_spreadsheet_formula(value: Any) -> Any:
+    """Prevent untrusted strings from being interpreted as spreadsheet formulas."""
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
+
+
 def _format_dataframe_for_excel(df: pd.DataFrame) -> pd.DataFrame:
     export_df = df.copy()
 
@@ -306,6 +314,8 @@ def _format_dataframe_for_excel(df: pd.DataFrame) -> pd.DataFrame:
         if pd.api.types.is_datetime64_any_dtype(export_df[column]):
             export_df[column] = export_df[column].dt.strftime("%d/%m/%Y")
 
+    for column in export_df.select_dtypes(include=["object", "string"]).columns:
+        export_df[column] = export_df[column].map(_neutralize_spreadsheet_formula)
     return export_df
 
 
@@ -625,11 +635,11 @@ def _build_pdf_dataframe_table(df: pd.DataFrame, max_rows: int = 14, max_cols: i
     )
 
     table_data = [
-        [Paragraph(str(column), header_style) for column in preview_df.columns]
+        [Paragraph(escape_xml(str(column)), header_style) for column in preview_df.columns]
     ]
 
     for _, row in preview_df.iterrows():
-        table_data.append([Paragraph(str(value), cell_style) for value in row.tolist()])
+        table_data.append([Paragraph(escape_xml(str(value)), cell_style) for value in row.tolist()])
 
     available_width = 26.0 * cm
     col_count = max(len(preview_df.columns), 1)
