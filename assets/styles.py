@@ -232,6 +232,84 @@ section[data-testid="stSidebar"] {
 ::-webkit-scrollbar-thumb:hover {
     background: #334155;
 }
+
+/* DataFlow Fusion Design System: midnight + aurora + glass + AI */
+:root {
+ --df-bg:#080d1b; --df-surface:#111b31; --df-line:rgba(156,181,240,.17);
+ --df-text:#f5f8ff; --df-muted:#a3b3d2; --df-blue:#4b93ff;
+ --df-violet:#a37bff; --df-cyan:#4de1e3;
+}
+html {scroll-behavior:smooth}
+.stApp {
+ background:radial-gradient(ellipse 55% 38% at 85% 0%,rgba(111,72,230,.18),transparent 85%),
+ radial-gradient(ellipse 45% 42% at 0% 30%,rgba(23,131,218,.11),transparent 90%),
+ linear-gradient(145deg,#080d1b,#0b1225 55%,#090d1a)!important;
+ color:var(--df-text);
+}
+[data-testid="stAppViewContainer"]>.main .block-container {
+ max-width:1600px;padding-top:2rem;padding-bottom:5rem;
+}
+[data-testid="stHeader"]{background:rgba(8,13,27,.78);backdrop-filter:blur(18px);border-bottom:1px solid rgba(148,163,184,.08)}
+section[data-testid="stSidebar"]{
+ background:linear-gradient(170deg,rgba(19,29,54,.98),rgba(8,13,27,.99))!important;
+ border-right:1px solid var(--df-line)!important;
+}
+section[data-testid="stSidebar"] [data-testid="stButton"] button[kind="secondary"] {
+ background:transparent!important;box-shadow:none!important;border:1px solid transparent!important;
+ color:#b9c6df!important;text-align:left;justify-content:flex-start;
+}
+section[data-testid="stSidebar"] [data-testid="stButton"] button[kind="secondary"]:hover {
+ background:rgba(103,129,215,.12)!important;border-color:var(--df-line)!important;color:white!important;
+}
+section[data-testid="stSidebar"] [data-testid="stButton"] button[kind="primary"]{
+ background:linear-gradient(100deg,rgba(65,126,248,.3),rgba(141,89,250,.18))!important;
+ border:1px solid rgba(117,151,255,.4)!important;box-shadow:inset 3px 0 0 #76aaff!important;
+ text-align:left;justify-content:flex-start;
+}
+.hero-block{position:relative;overflow:hidden;padding:2rem 2.25rem;margin:0 0 1.25rem;
+ border:1px solid rgba(134,155,234,.25);border-radius:24px;
+ background:linear-gradient(115deg,rgba(29,45,82,.85),rgba(17,25,48,.7) 65%,rgba(77,44,127,.33));
+ box-shadow:0 18px 70px rgba(0,0,0,.15),inset 0 1px 0 rgba(255,255,255,.07)}
+.hero-block:after{content:"";position:absolute;width:250px;height:250px;right:-75px;top:-150px;
+ background:radial-gradient(circle,rgba(129,92,255,.3),transparent 70%);pointer-events:none}
+.hero-eyebrow{font-size:.73rem;letter-spacing:.18em;text-transform:uppercase;color:#8dc9ff;font-weight:800;margin-bottom:.8rem}
+.main-title{font-size:clamp(2rem,4vw,3.1rem)!important;letter-spacing:-.045em;
+ background:linear-gradient(105deg,#fff 25%,#b7c9ff 67%,#a48bff)!important;
+ -webkit-background-clip:text!important;background-clip:text!important}
+.main-subtitle{color:#b2c1dc!important;line-height:1.75;max-width:900px}
+.source-card{display:inline-block;padding:.65rem 1rem;border-radius:12px;
+ background:rgba(77,115,202,.12);border:1px solid var(--df-line);font-size:.85rem;color:#c6d8ff}
+.section-title{letter-spacing:-.03em}.section-subtitle{color:var(--df-muted)!important}
+.kpi-card,.chart-card,.insight-card,.smart-insight-card{
+ background:linear-gradient(150deg,rgba(28,41,70,.87),rgba(15,23,44,.9))!important;
+ border:1px solid var(--df-line)!important;border-radius:20px!important;
+ box-shadow:0 12px 40px rgba(0,0,0,.14),inset 0 1px 0 rgba(255,255,255,.035)!important;
+ backdrop-filter:blur(16px);transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease;
+}
+.kpi-card:hover,.chart-card:hover,.insight-card:hover{transform:translateY(-3px);
+ border-color:rgba(122,160,255,.4)!important;box-shadow:0 16px 45px rgba(30,73,174,.13)!important}
+.kpi-value{font-variant-numeric:tabular-nums;letter-spacing:-.04em}
+.kpi-badge{background:rgba(100,128,255,.16)!important;color:#a8bfff!important}
+[data-testid="stMetric"]{padding:1.05rem 1.2rem;border:1px solid var(--df-line);
+ border-radius:16px;background:linear-gradient(150deg,rgba(31,44,77,.73),rgba(17,25,47,.73));
+ min-height:110px}
+[data-testid="stMetricLabel"]{color:#b1bfd9}[data-testid="stMetricValue"]{letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+[data-testid="stVerticalBlockBorderWrapper"]>div{border-color:var(--df-line)}
+[data-testid="stDataFrame"],[data-testid="stPlotlyChart"]{border-radius:16px;overflow:hidden}
+div[data-baseweb="select"]>div,div[data-baseweb="input"]>div,[data-testid="stDateInput"] input{
+ background:#17223b!important;border-color:rgba(143,166,223,.25)!important;border-radius:12px!important}
+.stButton>button[kind="primary"],.stDownloadButton>button{
+ background:linear-gradient(110deg,#397dff,#7955ec)!important;border:1px solid rgba(183,186,255,.22)!important;
+ box-shadow:0 7px 22px rgba(80,94,240,.19)!important;
+}
+.stButton>button:focus-visible,.stDownloadButton>button:focus-visible{outline:2px solid #8ad6ff;outline-offset:3px}
+@media(max-width:768px){
+ [data-testid="stAppViewContainer"]>.main .block-container{padding:1.2rem .8rem 3rem}
+ .hero-block{padding:1.25rem;border-radius:17px}.main-title{font-size:2rem!important}
+ .main-subtitle{font-size:.92rem}.kpi-card{padding:1rem}.section-title{font-size:1.3rem}
+}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
 </style>
 """,
         unsafe_allow_html=True,
