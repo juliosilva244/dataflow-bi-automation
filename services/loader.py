@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import os
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -285,6 +286,9 @@ def limpar_dados(df: pd.DataFrame) -> tuple[pd.DataFrame | None, str | None]:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def ler_arquivo_upload(arquivo_upload: Any) -> pd.DataFrame:
+    max_bytes = int(os.getenv("DATAFLOW_MAX_UPLOAD_MB", "25")) * 1024 * 1024
+    if getattr(arquivo_upload, "size", 0) > max_bytes:
+        raise ValueError("Arquivo excede o limite de upload permitido.")
     nome_arquivo = arquivo_upload.name.lower()
 
     if nome_arquivo.endswith((".xlsx", ".xls")):
@@ -383,5 +387,9 @@ def carregar_dados(arquivo_upload=None, periodo: str = "Tudo"):
     except FileNotFoundError:
         return None, None, f"Arquivo padrão não encontrado em: {DEFAULT_FILE_PATH}"
 
-    except Exception as erro:
-        return None, None, f"Erro ao carregar dados: {erro}"
+    except ValueError as erro:
+        return None, None, str(erro)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Falha ao carregar dados")
+        return None, None, "Não foi possível processar o arquivo. Verifique o formato e tente novamente."
