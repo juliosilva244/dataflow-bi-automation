@@ -97,7 +97,11 @@ RISCOS DETECTADOS:
     def clean_history(self, history):
         if not history:
             return []
-        return [{"role": item.get("role", "user"), "content": str(item.get("content", ""))} for item in history[-6:]]
+        return [
+            {"role": item["role"], "content": str(item.get("content", ""))[:4000]}
+            for item in history[-6:]
+            if isinstance(item, dict) and item.get("role") in {"user", "assistant"}
+        ]
 
     def build_messages(self, question: str, analytics_state: dict[str, Any], history=None):
         messages = [
@@ -126,7 +130,9 @@ RISCOS DETECTADOS:
         except ModuleNotFoundError:
             return "Dependência ausente: instale o pacote groq com `pip install groq` ou rode `pip install -r requirements.txt`."
         except Exception as error:
-            return f"Erro ao consultar o provedor de IA: {error}"
+            import logging
+            logging.getLogger(__name__).exception("Falha ao consultar o provedor de IA")
+            return "Não foi possível consultar a IA neste momento. Tente novamente mais tarde."
 
 
 def get_llm_router() -> LLMRouter:
