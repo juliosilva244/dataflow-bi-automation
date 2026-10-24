@@ -1,9 +1,112 @@
+# Python bytecode and build products
+.git/
 __pycache__/
 *.py[cod]
-.env
+*$py.class
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
 .venv/
+.venv*/
+.venv-candidate*/
+.venv-final-candidate/
 venv/
-.env.local
-.DS_Store
+env/
+ENV/
+
+# Test, lint, coverage and type-check caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
 .streamlit/secrets.toml
+*.pem
+*.key
+*.p12
+*.pfx
+*.pkl
+*.pickle
+*.sqlite*
+*.db
+*.har
+*.dmp
+*.dump
+
+# Private or operational data (the synthetic demo remains public)
+data/raw/
+data/private/
+data/uploads/
+uploads/
+!data/demo/
+!data/demo/**
+
+# Runtime output, logs, temporary files and generated reports
+outputs/
+artifacts/
+tmp/
+temp/
+src/utils/generate_data.py
 *.log
+*.tmp
+*.bak
+*.swp
+~$*
+
+# Local backups and restore points
+*BACKUP*/
+*backup*/
+*RESTORE*/
+*restore*/
+
+# IDE and operating-system files
+.idea/
+.vscode/
+*.code-workspace
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Historical internal audits may expose operational figures or machine/session details.
+# Keep originals locally; publish the sanitized release guide instead.
+docs/*_2026-*.md
+docs/FINAL_DATAFLOW_ULTIMATE_2_HOMOLOGATION.md
+docs/PUBLISHING_INVENTORY.md
+docs/PHASE_6_2_MANUAL_QA.md
+docs/PHASE_6_2_4_STREAMLIT_PILLOW_SECURITY_REPORT.md
+docs/PORTFOLIO_VIDEO_LINKEDIN.md
+docs/LICENSE_OPTIONS.md
+docs/images/
+requirements-lock-py311-windows.candidate.txt
+requirements-lock-py311-windows.pre-streamlit-1.66.1.txt
+
+# Local-only regressions tied to the operational dataset, its totals or its UI state.
+# Public, controlled-data tests remain versioned; no local test is deleted.
+tests/test_ai.py
+tests/test_ai_analytical_evidence.py
+tests/test_ai_diagnostic_access.py
+tests/test_ai_financial_grounding.py
+tests/test_ai_generation.py
+tests/test_ai_progressive_presentation.py
+tests/test_ai_session_navigation.py
+tests/test_analytical_architecture.py
+tests/test_data_quality_dashboard.py
+tests/test_final_sensitivity.py
+tests/test_governance.py
+tests/test_integrated_fixes.py
+tests/test_metrics.py
+tests/test_reporting_center.py
+tests/test_runtime_scope_audit.py
+tests/test_settings_center.py
+tests/test_sidebar_navigation.py
+tests/test_ui_navigation.py

@@ -1,12 +1,51 @@
 import pandas as pd
 import streamlit as st
 
-from services.formatter import format_currency, format_percent, safe_divide
+from domain.normalization import normalize_dataframe
+from domain.schema import resolve_column_name
+from services.settings import get_performance_settings
 
-try:
-    from services.schema_analyzer import analyze_schema
-except Exception:
-    analyze_schema = None
+
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    result = normalize_dataframe(df)
+    return result.dataframe if result.dataframe is not None else pd.DataFrame()
+
+
+def _find_col(df: pd.DataFrame, options: list[str]):
+    targets = {resolve_column_name(option) for option in options}
+    for column in df.columns:
+        if resolve_column_name(column) in targets:
+            return column
+    return None
+
+
+def _prepare_df(df: pd.DataFrame) -> pd.DataFrame:
+    df = _normalize_columns(df)
+
+    revenue_col = "Faturamento" if "Faturamento" in df.columns else None
+    quantity_col = "Quantidade" if "Quantidade" in df.columns else None
+    profit_col = "Lucro" if "Lucro" in df.columns else None
+    store_col = "Loja" if "Loja" in df.columns else None
+    category_col = "Categoria" if "Categoria" in df.columns else None
+    product_col = "Produto" if "Produto" in df.columns else None
+    order_col = "Pedido" if "Pedido" in df.columns else None
+
+    df.attrs["revenue_col"] = revenue_col
+    df.attrs["quantity_col"] = quantity_col
+    df.attrs["profit_col"] = profit_col
+    df.attrs["store_col"] = store_col
+    df.attrs["category_col"] = category_col
+    df.attrs["product_col"] = product_col
+    df.attrs["order_col"] = order_col
+
+    return df
+
+
+def _money(value):
+    try:
+        return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        return value
 
 
 def _empty_table(message: str):
@@ -21,160 +60,82 @@ def _empty_table(message: str):
     )
 
 
-def _get_schema(df: pd.DataFrame) -> dict:
-    if df is None or df.empty or analyze_schema is None:
-        return {
-            "metric_column": None,
-            "date_column": None,
-            "primary_dimension": None,
-            "secondary_dimension": None,
-            "dimension_columns": [],
-            "numeric_columns": [],
-            "date_columns": [],
-            "text_columns": [],
-            "domain": "generico",
-            "confidence": 0,
-            "warnings": [],
-        }
-
-    schema = analyze_schema(df)
-
-    if hasattr(schema, "to_dict"):
-        return schema.to_dict()
-
-    return dict(schema)
-
-
-def _clean_numeric(series: pd.Series) -> pd.Series:
-    if pd.api.types.is_numeric_dtype(series):
-        return pd.to_numeric(series, errors="coerce").fillna(0)
-
-    cleaned = (
-        series.astype(str)
-        .str.replace("R$", "", regex=False)
-        .str.replace("%", "", regex=False)
-        .str.replace(".", "", regex=False)
-        .str.replace(",", ".", regex=False)
-        .str.replace(r"[^\d.\-]", "", regex=True)
-    )
-
-    return pd.to_numeric(cleaned, errors="coerce").fillna(0)
-
-
 def _format_table(df: pd.DataFrame) -> pd.DataFrame:
     formatted = df.copy()
+    formatted.attrs = {}
 
     for col in formatted.columns:
-        normalized = str(col).lower()
-
-        if any(
-            term in normalized
-            for term in [
-                "faturamento",
-                "receita",
-                "valor",
-                "vendas",
-                "total",
-                "lucro",
-                "ticket",
-                "custo",
-                "despesa",
-                "saldo",
-                "salário",
-                "salario",
-                "métrica",
-                "metrica",
-            ]
-        ):
-            formatted[col] = formatted[col].apply(format_currency)
-
-        if any(term in normalized for term in ["participação", "participacao", "%"]):
-            formatted[col] = formatted[col].apply(format_percent)
+        if any(term in col.lower() for term in ["faturamento", "receita", "valor", "vendas", "total", "lucro", "ticket"]):
+            formatted[col] = formatted[col].apply(_money)
 
     return formatted
 
 
-def _build_dimension_summary(
-    df: pd.DataFrame,
-    dimension_col: str,
-    metric_col: str,
-    quantity_col: str | None = None,
-    limit: int = 30,
-) -> pd.DataFrame:
-    work_df = df.copy()
+def paginate_dataframe(df: pd.DataFrame, page: int, page_size: int):
+    page_size = max(int(page_size), 1)
+    total_pages = max((len(df) + page_size - 1) // page_size, 1)
+    page = min(max(int(page), 1), total_pages)
+    start = (page - 1) * page_size
+    result = df.iloc[start : start + page_size].copy()
+    result.attrs = {}
+    return result, total_pages, page
 
-    if metric_col not in work_df.columns or dimension_col not in work_df.columns:
-        return pd.DataFrame()
 
-    work_df[metric_col] = _clean_numeric(work_df[metric_col])
-    work_df[dimension_col] = work_df[dimension_col].fillna("Não informado").astype(str)
+def table_store_summary(df: pd.DataFrame):
+    df = _prepare_df(df)
 
-    agg = {
-        metric_col: "sum",
-    }
+    store_col = df.attrs["store_col"]
+    revenue_col = df.attrs["revenue_col"]
+    quantity_col = df.attrs["quantity_col"]
+    profit_col = df.attrs["profit_col"]
+    order_col = df.attrs["order_col"]
 
-    if quantity_col and quantity_col in work_df.columns:
-        work_df[quantity_col] = _clean_numeric(work_df[quantity_col])
+    if not store_col or not revenue_col:
+        _empty_table("Não encontrei colunas de loja e faturamento/valor.")
+        return
+
+    agg = {revenue_col: "sum"}
+
+    if quantity_col:
         agg[quantity_col] = "sum"
 
-    summary = work_df.groupby(dimension_col, as_index=False, dropna=False).agg(agg)
+    if profit_col:
+        agg[profit_col] = "sum"
 
-    total_metric = summary[metric_col].sum()
+    if order_col:
+        agg[order_col] = "nunique"
 
-    summary["Participação %"] = (
-        summary[metric_col] / total_metric * 100 if total_metric else 0
-    )
-
-    summary["Registros"] = work_df.groupby(dimension_col, dropna=False).size().values
-
-    if quantity_col and quantity_col in summary.columns:
-        summary["Média por Quantidade"] = summary.apply(
-            lambda row: safe_divide(row[metric_col], row[quantity_col]),
-            axis=1,
-        )
-
-    summary = summary.sort_values(metric_col, ascending=False).head(limit)
+    summary = df.groupby(store_col, as_index=False).agg(agg)
 
     rename_map = {
-        dimension_col: dimension_col,
-        metric_col: "Valor Total",
+        store_col: "Loja",
+        revenue_col: "Faturamento",
     }
 
-    if quantity_col and quantity_col in summary.columns:
+    if quantity_col:
         rename_map[quantity_col] = "Quantidade"
+
+    if profit_col:
+        rename_map[profit_col] = "Lucro"
+
+    if order_col:
+        rename_map[order_col] = "Pedidos"
 
     summary = summary.rename(columns=rename_map)
 
-    return summary
+    if "Pedidos" in summary.columns:
+        denominator = summary["Pedidos"]
+    else:
+        record_counts = df.groupby(store_col).size()
+        denominator = summary["Loja"].map(record_counts)
 
+    summary["Ticket Médio"] = (
+        summary["Faturamento"] / denominator.replace(0, pd.NA)
+    ).fillna(0)
 
-def table_dynamic_dimension(
-    df: pd.DataFrame,
-    dimension_col: str | None,
-    metric_col: str | None,
-    quantity_col: str | None,
-    title: str,
-):
-    if not dimension_col or not metric_col:
-        _empty_table("Não foi possível detectar dimensão e métrica suficientes para esta tabela.")
-        return
+    summary = summary.sort_values("Faturamento", ascending=False)
 
-    if dimension_col not in df.columns or metric_col not in df.columns:
-        _empty_table("As colunas detectadas não existem na base atual.")
-        return
-
-    summary = _build_dimension_summary(
-        df=df,
-        dimension_col=dimension_col,
-        metric_col=metric_col,
-        quantity_col=quantity_col,
-    )
-
-    if summary.empty:
-        _empty_table("Não existem dados suficientes para montar o resumo.")
-        return
-
-    st.markdown(f"### {title}")
+    st.markdown("### Resumo por Loja")
     st.dataframe(
         _format_table(summary),
         width="stretch",
@@ -182,39 +143,45 @@ def table_dynamic_dimension(
     )
 
 
-def table_numeric_summary(df: pd.DataFrame, schema: dict):
-    numeric_columns = schema.get("numeric_columns", []) or []
+def table_product_summary(df: pd.DataFrame):
+    df = _prepare_df(df)
 
-    if not numeric_columns:
-        _empty_table("Nenhuma coluna numérica foi detectada.")
+    product_col = df.attrs["product_col"]
+    category_col = df.attrs["category_col"]
+    revenue_col = df.attrs["revenue_col"]
+    quantity_col = df.attrs["quantity_col"]
+
+    if not product_col or not revenue_col:
+        _empty_table("Não encontrei colunas de produto e faturamento/valor.")
         return
 
-    rows = []
+    group_cols = [product_col]
 
-    for column in numeric_columns:
-        if column not in df.columns:
-            continue
+    if category_col:
+        group_cols.append(category_col)
 
-        values = _clean_numeric(df[column])
+    agg = {revenue_col: "sum"}
 
-        rows.append(
-            {
-                "Métrica": column,
-                "Total": values.sum(),
-                "Média": values.mean(),
-                "Mínimo": values.min(),
-                "Máximo": values.max(),
-                "Valores válidos": int(values.notna().sum()),
-            }
-        )
+    if quantity_col:
+        agg[quantity_col] = "sum"
 
-    summary = pd.DataFrame(rows)
+    summary = df.groupby(group_cols, as_index=False).agg(agg)
 
-    if summary.empty:
-        _empty_table("Não foi possível consolidar as métricas numéricas.")
-        return
+    rename_map = {
+        product_col: "Produto",
+        revenue_col: "Faturamento",
+    }
 
-    st.markdown("### Resumo Numérico")
+    if category_col:
+        rename_map[category_col] = "Categoria"
+
+    if quantity_col:
+        rename_map[quantity_col] = "Quantidade"
+
+    summary = summary.rename(columns=rename_map)
+    summary = summary.sort_values("Faturamento", ascending=False).head(20)
+
+    st.markdown("### Top Produtos")
     st.dataframe(
         _format_table(summary),
         width="stretch",
@@ -222,41 +189,50 @@ def table_numeric_summary(df: pd.DataFrame, schema: dict):
     )
 
 
-def table_schema_summary(schema: dict):
-    columns = schema.get("columns", []) or []
+def table_category_summary(df: pd.DataFrame):
+    df = _prepare_df(df)
 
-    if not columns:
-        _empty_table("Nenhuma leitura de schema está disponível.")
+    category_col = df.attrs["category_col"]
+    revenue_col = df.attrs["revenue_col"]
+    quantity_col = df.attrs["quantity_col"]
+
+    if not category_col or not revenue_col:
+        _empty_table("Não encontrei colunas de categoria e faturamento/valor.")
         return
 
-    rows = []
+    agg = {revenue_col: "sum"}
 
-    for column in columns:
-        rows.append(
-            {
-                "Coluna": column.get("name"),
-                "Função Detectada": column.get("role"),
-                "Confiança": column.get("confidence"),
-                "Tipo": column.get("dtype"),
-                "Valores Únicos": column.get("unique_count"),
-                "Nulos %": column.get("null_ratio", 0) * 100,
-                "Exemplos": ", ".join(column.get("sample_values", [])[:3]),
-            }
-        )
+    if quantity_col:
+        agg[quantity_col] = "sum"
 
-    summary = pd.DataFrame(rows)
+    summary = df.groupby(category_col, as_index=False).agg(agg)
 
-    st.markdown("### Leitura Automática do Schema")
+    total_revenue = summary[revenue_col].sum()
+
+    summary["participacao_%"] = (
+        summary[revenue_col] / total_revenue * 100 if total_revenue else 0
+    )
+
+    rename_map = {
+        category_col: "Categoria",
+        revenue_col: "Faturamento",
+        "participacao_%": "Participação %",
+    }
+
+    if quantity_col:
+        rename_map[quantity_col] = "Quantidade"
+
+    summary = summary.rename(columns=rename_map)
+    summary = summary.sort_values("Faturamento", ascending=False)
+
+    summary["Participação %"] = summary["Participação %"].map(lambda x: f"{x:.2f}%")
+
+    st.markdown("### Desempenho por Categoria")
     st.dataframe(
         _format_table(summary),
         width="stretch",
         hide_index=True,
     )
-
-    warnings = schema.get("warnings", []) or []
-
-    if warnings:
-        st.warning(" | ".join(warnings))
 
 
 def table_raw_data(df: pd.DataFrame):
@@ -264,9 +240,36 @@ def table_raw_data(df: pd.DataFrame):
         _empty_table("Nenhuma base carregada.")
         return
 
-    st.markdown("### Base Completa")
+    st.markdown("### Base de Dados")
+    default_size = get_performance_settings().table_page_size
+    size_options = sorted({50, 100, 250, 500, default_size})
+    col_size, col_page = st.columns([1, 1])
+    with col_size:
+        page_size = st.selectbox(
+            "Linhas por página",
+            size_options,
+            index=size_options.index(default_size),
+            key="raw_table_page_size",
+        )
+    total_pages = max((len(df) + page_size - 1) // page_size, 1)
+    with col_page:
+        page = st.number_input(
+            "Página",
+            min_value=1,
+            max_value=total_pages,
+            value=1,
+            step=1,
+            key=f"raw_table_page_{total_pages}",
+        )
+    display_df, total_pages, page = paginate_dataframe(df, page, page_size)
+    start = (page - 1) * page_size + 1
+    end = min(page * page_size, len(df))
+    st.caption(
+        f"Exibindo registros {start:,} a {end:,} de {len(df):,} "
+        f"(página {page} de {total_pages}). Cálculos e exportação usam a base completa."
+    )
     st.dataframe(
-        df,
+        display_df,
         width="stretch",
         hide_index=True,
     )
@@ -279,66 +282,25 @@ def render_tables(df: pd.DataFrame):
         _empty_table("Nenhuma base de dados foi carregada.")
         return
 
-    schema = _get_schema(df)
+    tab1, tab2, tab3, tab4 = st.tabs(
+        [
+            "Resumo por Loja",
+            "Top Produtos",
+            "Categorias",
+            "Base Completa",
+        ]
+    )
 
-    metric_col = schema.get("metric_column")
-    primary_dimension = schema.get("primary_dimension")
-    secondary_dimension = schema.get("secondary_dimension")
-    dimension_columns = schema.get("dimension_columns", []) or []
+    with tab1:
+        table_store_summary(df)
 
-    quantity_col = None
+    with tab2:
+        table_product_summary(df)
 
-    for candidate in ["Quantidade", "quantidade", "qtd", "qtde", "volume"]:
-        if candidate in df.columns:
-            quantity_col = candidate
-            break
+    with tab3:
+        table_category_summary(df)
 
-    tab_labels = [
-        "Dimensão Principal",
-        "Dimensão Secundária",
-        "Resumo Numérico",
-        "Schema Detectado",
-        "Base Completa",
-    ]
-
-    tabs = st.tabs(tab_labels)
-
-    with tabs[0]:
-        table_dynamic_dimension(
-            df=df,
-            dimension_col=primary_dimension,
-            metric_col=metric_col,
-            quantity_col=quantity_col,
-            title=f"Resumo por {primary_dimension or 'Dimensão Principal'}",
-        )
-
-    with tabs[1]:
-        if secondary_dimension:
-            table_dynamic_dimension(
-                df=df,
-                dimension_col=secondary_dimension,
-                metric_col=metric_col,
-                quantity_col=quantity_col,
-                title=f"Resumo por {secondary_dimension}",
-            )
-        elif len(dimension_columns) >= 2:
-            table_dynamic_dimension(
-                df=df,
-                dimension_col=dimension_columns[1],
-                metric_col=metric_col,
-                quantity_col=quantity_col,
-                title=f"Resumo por {dimension_columns[1]}",
-            )
-        else:
-            _empty_table("Nenhuma dimensão secundária foi detectada.")
-
-    with tabs[2]:
-        table_numeric_summary(df, schema)
-
-    with tabs[3]:
-        table_schema_summary(schema)
-
-    with tabs[4]:
+    with tab4:
         table_raw_data(df)
 
 

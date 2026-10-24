@@ -1,340 +1,157 @@
-# 🚀 DataFlow BI Automation
-
-**Plataforma de Business Intelligence em Python para transformar planilhas Excel/CSV em dashboards executivos, KPIs automáticos, análise de schema, insights e relatórios exportáveis.**
-
-O **DataFlow BI Automation** foi desenvolvido como um projeto profissional de portfólio em Dados/BI, com foco em automação analítica, dashboards executivos, análise automática de bases tabulares e geração de relatórios em Excel/PDF.
-
----
-
-## 🌐 Acesse o projeto online
-
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://dataflow-bi-automation-julio.streamlit.app)
-
-🔗 **Deploy:** https://dataflow-bi-automation-julio.streamlit.app
-
----
-
-## 📌 Visão geral
-
-Empresas pequenas, áreas administrativas e equipes operacionais ainda dependem muito de planilhas manuais para monitorar vendas, desempenho, produtos, lojas, volume, receita e indicadores.
-
-O **DataFlow BI Automation** resolve esse problema automatizando o processo de análise:
-
-1. o usuário envia uma planilha `.xlsx`, `.xls` ou `.csv`;
-2. o sistema identifica automaticamente colunas relevantes;
-3. a aplicação detecta métrica principal, coluna de data, dimensões e domínio provável da base;
-4. KPIs e gráficos são gerados automaticamente;
-5. insights locais são exibidos sem depender obrigatoriamente de IA externa;
-6. relatórios podem ser exportados em Excel e PDF executivo.
-
----
-
-## 🎯 Objetivo do projeto
-
-O objetivo do projeto é demonstrar uma solução prática de BI com Python, capaz de transformar dados tabulares em uma experiência visual, analítica e exportável.
-
-O projeto foi pensado para:
-
-* portfólio profissional em Dados/BI;
-* demonstração de automação analítica;
-* análise rápida de planilhas empresariais;
-* geração automática de dashboards;
-* criação de relatórios executivos;
-* estudo de arquitetura modular com Streamlit, Pandas e Plotly.
-
----
-
-## 🖼️ Demonstração visual
-
-### Painel executivo
-
-![Painel executivo](docs/images/dashboard-home.png)
-
-### KPIs automáticos
-
-![KPIs automáticos](docs/images/dashboard-kpis.png)
-
-### Gráficos e rankings
-
-![Gráficos e rankings](docs/images/dashboard-charts.png)
-
-### Insights automáticos
-
-![Insights automáticos](docs/images/dashboard-insights.png)
-
-### Exportações Excel e PDF
-
-![Exportações Excel e PDF](docs/images/dashboard-exports.png)
-
----
-
-## ✨ Principais recursos
-
-* Upload de arquivos `.xlsx`, `.xls` e `.csv`
-* Base padrão de demonstração
-* Detecção automática de schema
-* Identificação automática de:
-
-  * métrica principal
-  * coluna de data
-  * dimensão principal
-  * dimensão secundária
-  * categoria
-  * coluna temporal
-  * domínio provável da base
-* KPIs executivos automáticos
-* Gráficos interativos com Plotly
-* Insights automáticos locais
-* AI BI Assistant opcional com Groq
-* Exportação para Excel
-* Exportação para PDF executivo
-* Barra lateral com navegação real
-* Modo debug para inspeção técnica
-* Layout escuro com aparência de painel SaaS
-
----
-
-## 🧠 Detecção automática de schema
-
-Um dos diferenciais do DataFlow é o uso de um núcleo mais universal para interpretação de planilhas.
-
-Em vez de obrigar toda base a seguir um modelo fixo, o sistema preserva as colunas originais e usa o `schema_analyzer.py` para inferir a função de cada coluna.
-
-O sistema tenta identificar automaticamente:
-
-| Tipo detectado      | Exemplo                      |
-| ------------------- | ---------------------------- |
-| Coluna temporal     | Data, Período, Mês           |
-| Métrica principal   | Faturamento, Receita, Valor  |
-| Dimensão principal  | Loja, Cliente, Região        |
-| Dimensão secundária | Produto, Categoria, Serviço  |
-| Quantidade          | Quantidade, Volume, Unidades |
-| Domínio provável    | Vendas, Operações, Genérico  |
-
-Isso permite que o projeto seja mais flexível do que um painel fixo feito apenas para uma planilha específica.
-
----
-
-## 📊 KPIs gerados automaticamente
-
-A aplicação gera indicadores executivos com base no schema detectado, incluindo:
-
-* faturamento total;
-* ticket médio;
-* total de registros analisados;
-* quantidade total;
-* dimensão principal mais relevante;
-* dimensão secundária mais relevante;
-* pontuação de confiança do schema.
-
----
-
-## 📈 Visualização
-
-O dashboard gera gráficos interativos com Plotly, como:
-
-* evolução da métrica ao longo do tempo;
-* classificação por dimensão principal;
-* classificação por dimensão secundária;
-* análise por loja;
-* análise por produto;
-* tabelas resumidas para exploração dos dados.
-
----
-
-## 📤 Exportações
-
-O DataFlow permite exportar os resultados da análise em dois formatos:
-
-### Excel
-
-O relatório Excel é voltado para auditorias e análises detalhadas. Ele pode conter várias abas, como:
-
-* base preparada;
-* KPIs;
-* qualidade do schema;
-* schema detectado;
-* faturamento por mês;
-* faturamento por loja;
-* melhores produtos;
-* faturamento por dia;
-* resumo por dimensão principal;
-* resumo por dimensão secundária.
-
-### PDF
-
-O relatório PDF é voltado para leitura executiva. Ele apresenta:
-
-* visão geral da análise;
-* domínio detectado;
-* métrica principal;
-* dimensões principais;
-* KPIs executivos;
-* pontuação do schema;
-* rankings e resumos financeiros;
-* tabelas com valores formatados em reais.
-
----
-
-## 🤖 Assistente de IA BI opcional
-
-O projeto possui integração opcional com a API da Groq.
-
-Quando configurado, o assistente pode apoiar análises e perguntas sobre os dados. Sem chave de API, o dashboard continua funcionando normalmente com os insights locais.
-
-Exemplo de `.env`:
-
-```env
-GROQ_API_KEY=sua_chave_aqui
-GROQ_MODEL=llama-3.1-8b-instant
-```
-
----
-
-## 🛠️ Pilha utilizada
-
-* Python
-* Streamlit
-* Pandas
-* Plotly
-* OpenPyXL
-* ReportLab
-* python-dotenv
-* API Groq opcional
-
----
-
-## 📂 Estrutura principal
+# DataFlow Fusion Ultimate 2.0
+
+Aplicação local de Business Intelligence em Python e Streamlit para ingestão segura,
+normalização, análise e exportação de dados comerciais. O projeto reúne oito áreas:
+Visão Geral, Análise de Vendas, Produtos, Lojas, Inteligência Artificial, Qualidade dos
+Dados, Relatórios e Configurações.
+
+> Versão estável: **IA-geracao-20261023.6**, auditoria **IA-auditoria-20261023.3**.
+> Esta distribuição pública contém código, testes com dados controlados e uma base
+> sintética; não contém a base operacional nem relatórios internos. A publicação depende
+> de confirmação do proprietário. Homologação real da Groq nesta revisão e deploy em
+> produção continuam pendentes. Veja [notas da versão](docs/RELEASE_IA6_AUDIT3.md).
+
+## Problema e objetivo
+
+O DataFlow transforma arquivos CSV/XLSX heterogêneos em uma visão analítica consistente,
+sem esconder perdas de qualidade ou anomalias monetárias. O fluxo local cobre carga,
+validação, filtros, comparação temporal, indicadores e relatórios.
+
+## Funcionalidades confirmadas
+
+- schema canônico, aliases e normalização centralizados;
+- tratamento de datas, nulos e valores monetários brasileiros;
+- soma monetária exata com `Decimal` nos indicadores e relatórios;
+- períodos comparativos equivalentes e filtros compartilhados;
+- KPIs, rankings, gráficos Plotly e tabelas paginadas;
+- auditoria de registros válidos, descartados, duplicados e motivos de rejeição;
+- exportações CSV (ZIP), Excel e PDF com neutralização de fórmulas;
+- validação estrutural e limites configuráveis para uploads CSV/XLSX;
+- caches isolados por sessão, telemetria local e exportação sob demanda;
+- assistente Groq opcional com consentimento, anonimização, timeout, tentativas e limites;
+- interface dark responsiva com oito destinos de navegação.
+
+## Tecnologias e arquitetura
+
+Python 3.11, Streamlit, Pandas, Plotly, OpenPyXL e ReportLab.
 
 ```text
-dataflow-bi-automation/
-├── app.py
-├── main.py
-├── requirements.txt
-├── README.md
-├── .env.example
-├── assets/
-│   └── styles.py
-├── components/
-│   ├── ai_assistant.py
-│   ├── charts.py
-│   ├── chat_message.py
-│   ├── insights.py
-│   ├── kpis.py
-│   ├── sidebar.py
-│   └── tables.py
-├── services/
-│   ├── analytics.py
-│   ├── exporter.py
-│   ├── formatter.py
-│   ├── insight_engine.py
-│   ├── llm_router.py
-│   ├── loader.py
-│   ├── metrics_engine.py
-│   ├── schema_analyzer.py
-│   └── providers/
-│       └── groq_provider.py
-└── data/
-    └── raw/
-        └── vendas.xlsx
+app.py / main.py       composição e ponto de entrada
+components/            páginas e componentes Streamlit
+domain/                schema, normalização, modelos e períodos
+services/              carga, métricas, segurança, IA e relatórios
+services/providers/    adaptadores de provedores externos
+data/demo/             dados públicos, sintéticos e determinísticos
+scripts/               ferramentas reproduzíveis
+tests/                 testes unitários e de integração local
+docs/                  arquitetura, segurança e publicação
 ```
 
----
+Veja [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## 🚀 Como rodar o projeto
+## Instalação
 
-### 1. Clonar o repositório
+Requisitos: Python 3.11 (ambiente validado: 3.11.9). No PowerShell:
 
-```bash
-git clone https://github.com/juliosilva244/dataflow-bi-automation.git
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-### 2. Acessar a pasta
+Para desenvolvimento: `python -m pip install -r requirements-dev.txt`.
+Para reproduzir o ambiente validado Windows/Python 3.11, em vez das instalações acima:
+`python -m pip install -r requirements-lock-py311-windows.txt` (inclui ferramentas de teste).
 
-```bash
-cd dataflow-bi-automation
+As dependências diretas estão fixadas nas versões validadas. O arquivo
+`requirements-lock-py311-windows.txt` reproduz o candidato aprovado em Windows/Python
+3.11. Snapshots locais de rollback não fazem parte da distribuição pública. O lock ainda
+não possui hashes de distribuição; isso permanece uma limitação para produção.
+
+## Configuração e execução
+
+O ponto oficial é `main.py`:
+
+```powershell
+Copy-Item .env.example .env
+python -m streamlit run main.py --server.port 8510
 ```
 
-### 3. Instalar as dependências
+Abra `http://localhost:8510`. O `.env` é opcional e nunca deve ser versionado. Sem chave
+de IA, todo o dashboard funciona; somente o assistente externo fica indisponível.
+Cada usuário informa sua própria chave Groq no campo mascarado da página **Inteligência
+Artificial**. A chave permanece apenas na memória da sessão, pode ser substituída/removida
+e não deve ser colocada no `.env`.
+`DATAFLOW_DISPLAY_NAME` personaliza a saudação sem embutir identidade no código.
 
-```bash
-pip install -r requirements.txt
+## Dados e demonstração segura
+
+Campos obrigatórios: `Data`, `Loja`, `Produto`, `Quantidade` e `Faturamento`. `Pedido`,
+`Categoria`, `Lucro` e `Preço Unitário` são opcionais. Valores podem usar `R$ 1.234,56`.
+
+Para demonstrar, faça upload de [`data/demo/vendas_demo.csv`](data/demo/vendas_demo.csv).
+São 720 registros 100% fictícios, com seed fixa, separados da base operacional. Regenere
+com `python -m scripts.generate_demo_data`.
+
+Sem upload, a aplicação tenta `data/raw/vendas.xlsx`. A distribuição pública não inclui
+essa base: a mensagem de arquivo padrão ausente é esperada no primeiro acesso. Abra
+**Dados** na barra superior e envie o CSV demo para carregar o dashboard. Não copie uma
+base real para o repositório. O comportamento local com base própria foi preservado.
+
+## Testes e qualidade
+
+```powershell
+python -m pytest
+python -m ruff check .
+python -m compileall -q app.py main.py assets components domain services scripts tests
+python -m pip check
 ```
 
-### 4. Rodar o aplicativo
+O benchmark local é `python -m benchmarks.benchmark_pipeline`. Esses comandos não enviam
+dados a serviços externos.
 
-```bash
-streamlit run app.py
-```
+A suíte pública usa fixtures controladas e a demonstração sintética. Regressões locais
+que dependem da base operacional, dos seus totais ou do seu estado visual não são
+distribuídas; permanecem preservadas localmente. Os 357 testes históricos aprovados não
+devem ser confundidos com a contagem desta seleção pública. Os testes AppTest não
+substituem inspeção visual real em navegador.
 
-Ou, no Windows:
+## Segurança, privacidade e IA
 
-```bash
-run.bat
-```
+Uploads são validados por conteúdo e estrutura, incluindo limites e proteções XLSX/ZIP.
+Mensagens públicas não expõem detalhes técnicos; logs locais são sanitizados. HTML
+dinâmico é escapado e células exportadas são protegidas contra fórmulas.
 
-Depois acesse no navegador:
+A IA requer configuração, ativação e consentimento explícito. A anonimização é padrão, e
+o provedor recebe pergunta, histórico curto e agregados — nunca o DataFrame completo.
+Consulte [docs/SECURITY.md](docs/SECURITY.md).
 
-```text
-http://localhost:8501
-```
+## Capturas
 
----
+Capturas existentes exigem revisão de conteúdo/autorização. O roteiro está em
+[`docs/screenshots/README.md`](docs/screenshots/README.md); mockups não devem ser
+apresentados como telas reais.
 
-## 🧪 Validação local
+## Limitações conhecidas
 
-Comandos usados para validar o projeto:
+- nenhuma implantação em nuvem foi homologada nesta preparação; o README remoto
+  anterior anuncia um app no Streamlit Cloud, cuja situação e autoatualização não
+  foram verificadas — conferir antes do push;
+- a integração externa disponível é Groq e exige credencial própria;
+- a base operacional não é candidata automática à publicação;
+- a auditoria não substitui monitoramento contínuo de novos avisos;
+- o lock não contém hashes de distribuição;
+- a aprovação visual foi declarada pelo proprietário; não há novas capturas públicas
+  nem uma nova inspeção independente nesta preparação;
+- a geração real Groq da revisão `.6` ainda requer teste autorizado;
+- dados e imagens em commits antigos precisam de revisão de privacidade: removê-los da
+  versão atual não os apaga do histórico Git.
 
-```bash
-python -m compileall assets components services src app.py main.py
-pip install -r requirements.txt
-python -m streamlit run app.py
-```
+## Autoria e licença
 
-Status validado:
+Projeto **DataFlow Fusion Ultimate 2.0**. A [licença MIT](LICENSE) já existente no
+repositório remoto foi preservada, incluindo seu aviso de copyright. Dados pessoais de
+contato e bases operacionais não integram esta distribuição.
 
-* aplicação sobe localmente;
-* dependências instaladas corretamente;
-* arquivos Python compilam sem erro;
-* exportação Excel funcional;
-* exportação PDF funcional;
-* avisos antigos do Streamlit corrigidos.
-
----
-
-## 📌 Diferenciais técnicos
-
-* Arquitetura modular separada por componentes e serviços.
-* Analisador de schema para interpretar colunas automaticamente.
-* Métricas calculadas dinamicamente.
-* Exportador Excel/PDF desacoplado.
-* Layout visual customizado para aparência de dashboard executivo.
-* IA opcional sem tornar o projeto dependente de API externa.
-* Base padrão para demonstração imediata.
-* Estrutura preparada para evolução futura com filtros avançados, deploy e BI Assistant mais robusto.
-
----
-
-## 🧭 Possíveis evoluções
-
-* Deploy online com Streamlit Community Cloud.
-* Inclusão de screenshots e GIF demonstrativo.
-* Filtros avançados por período, loja, produto e categoria.
-* Gráficos adicionais, como donut chart e análise comparativa.
-* Relatório PDF com gráficos incorporados.
-* Camada de perguntas em linguagem natural sobre os dados.
-* Suporte a múltiplos arquivos e comparação entre períodos.
-* Sistema de templates por domínio de negócio.
-
----
-
-## 👨‍💻 Autor
-
-**Júlio Silva**
-GitHub: https://github.com/juliosilva244
-
----
-
-## 📄 Licença
-
-Projeto desenvolvido para fins educacionais, demonstração profissional, portfólio em Dados/BI e validação de conceitos de automação analítica com Python.
+English documentation: [README_EN.md](README_EN.md).

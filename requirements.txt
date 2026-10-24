@@ -1,8 +1,8 @@
-pandas>=2.2.0
-openpyxl>=3.1.2
-streamlit>=1.35.0
-plotly>=5.20.0
-python-dotenv>=1.0.1
-reportlab>=4.2.0
-groq>=0.9.0
-httpx==0.27.2
+# Direct dependencies validated with Python 3.11.9 on 2026-10-23.
+pandas==3.0.3
+openpyxl==3.1.5
+plotly==6.7.0
+reportlab==4.5.1
+python-dotenv==1.2.2
+groq==1.2.0
+streamlit==1.66.1

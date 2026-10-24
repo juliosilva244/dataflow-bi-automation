@@ -1,362 +1,320 @@
-from __future__ import annotations
-
-from datetime import datetime
-from textwrap import dedent
-
 import pandas as pd
 import streamlit as st
 
 from assets.styles import load_css
 from components.ai_assistant import render_ai_assistant
-from components.charts import render_charts
-from components.insights import render_insights
-from components.kpis import render_kpis
-from components.sidebar import render_sidebar
-from components.tables import render_table
-from services.exporter import gerar_excel, gerar_pdf
-from services.loader import carregar_dados
-from services.metrics_engine import construir_analytics_state
-
-
-st.set_page_config(
-    page_title="DataFlow BI Automation",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded",
+from components.analytical_scope import render_analytical_scope
+from components.charts import (
+    render_revenue_chart,
+    render_store_chart,
 )
+from components.executive_dashboard import (
+    display_name,
+    render_ai_panel,
+    render_category_donut,
+    render_insight_row,
+    render_kpi_strip,
+    render_products_panel,
+)
+from components.products_dashboard import render_products_dashboard
+from components.quality_dashboard import render_quality_dashboard
+from components.reports_dashboard import render_reports_dashboard
+from components.sales_dashboard import render_sales_dashboard
+from components.settings_dashboard import render_settings_dashboard
+from components.sidebar import PAGES, render_sidebar, render_sidebar_status, sidebar_layout_css
+from components.stores_dashboard import render_stores_dashboard
+from services.anomalies import detect_extreme_monetary_values, financial_anomaly_notice
+from services.llm_router import SlidingWindowRateLimiter, ensure_current_rate_limiter
+from services.loader import carregar_dados
+from services.metrics_engine import build_revenue_by_month, construir_analytics_state
+from services.performance import (
+    SessionScopedCache,
+    TelemetryCollector,
+    get_cached_analytics,
+)
+from services.preferences import initialize_preferences, preference_css, read_preferences
+from services.security import escape_html
+from services.settings import get_performance_settings, get_security_settings
 
-load_css()
+
+def navigate_to(page):
+    st.session_state.active_page = page
 
 
-def render_html(content: str) -> None:
-    st.markdown(dedent(content).strip(), unsafe_allow_html=True)
+def clear_filter_state():
+    st.session_state.selected_lojas = []
+    st.session_state.selected_produtos = []
+    st.session_state.pop("selected_date_range", None)
 
 
-def init_session_state() -> None:
+def init_session_state():
+    performance = get_performance_settings()
+    security = get_security_settings()
     defaults = {
-        "selected_primary_dimension": [],
-        "selected_secondary_dimension": [],
+        "active_page": PAGES[0],
+        "selected_lojas": [],
+        "selected_produtos": [],
         "selected_periodo": "Tudo",
-        "active_page": "Painel",
-        "ai_mode": "Executivo",
-        "ai_enabled": True,
-        "chat_history": [],
-        "debug_mode": False,
+        "global_search": "",
+        "ai_enabled": False,
+        "ai_consent": False,
+        "ai_anonymize": get_security_settings().ai_anonymize_default,
+        "groq_api_key": "",
+        "ai_connection_status": None,
+        "ai_rate_limiter": SlidingWindowRateLimiter(security.ai_requests_per_minute),
+        "performance_cache": SessionScopedCache(
+            max_entries=performance.cache_max_entries,
+            ttl_seconds=performance.cache_ttl_seconds,
+        ),
+        "performance_telemetry": TelemetryCollector(),
+        "prepared_export_key": None,
+        "prepared_export_bytes": None,
+        "sidebar_menu_search": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+    st.session_state.ai_rate_limiter = ensure_current_rate_limiter(
+        st.session_state.ai_rate_limiter, security.ai_requests_per_minute,
+    )
+    initialize_preferences(st.session_state)
 
 
-def safe_session_list(key: str, valid_options: list[str]) -> None:
-    current_values = st.session_state.get(key, [])
-    if not isinstance(current_values, list):
-        st.session_state[key] = []
-        return
-    st.session_state[key] = [value for value in current_values if value in valid_options]
+def page_header(title, subtitle, source=None):
+    st.markdown('<div class="eyebrow">DATAFLOW FUSION · ANALYTICS WORKSPACE</div>', unsafe_allow_html=True)
+    st.title(title)
+    st.markdown(f'<div class="page-subtitle">{escape_html(subtitle)}</div>', unsafe_allow_html=True)
+    if source:
+        st.markdown(
+            f'<div class="source-pill">Fonte: {escape_html(source)}</div>',
+            unsafe_allow_html=True,
+        )
 
 
-def get_page_title(active_page: str) -> str:
-    page_titles = {
-        "Painel": "Painel Executivo",
-        "Performance": "Desempenho Analítico",
-        "DimensaoSecundaria": "Análise por Dimensão Secundária",
-        "DimensaoPrincipal": "Análise por Dimensão Principal",
-        "Relatorios": "Relatórios Executivos",
-        "Exportacoes": "Central de Exportações",
-    }
-    return page_titles.get(active_page, "Painel Executivo")
+def render_data_controls():
+    st.markdown('<div class="fusion-topbar"><div class="fusion-eyebrow">CENTRAL ANALÍTICA</div></div>', unsafe_allow_html=True)
+    with st.container(border=True, key="topbar-controls"):
+        search_col, period_col, data_col, report_col = st.columns([3.2, 1.35, 0.8, 1.15])
+        with search_col:
+            st.text_input(
+                "Busca",
+                key="global_search",
+                placeholder="Buscar produto ou loja...",
+                label_visibility="collapsed",
+            )
+        with period_col:
+            period = st.selectbox(
+                "Período rápido",
+                ["Tudo", "Últimos 7 dias", "Últimos 30 dias", "Últimos 90 dias", "Ano atual"],
+                key="selected_periodo",
+                label_visibility="collapsed",
+            )
+        with data_col:
+            with st.popover("Dados", width="stretch"):
+                upload = st.file_uploader(
+                    "Arquivo CSV ou XLSX",
+                    type=["xlsx", "csv"],
+                    help="Arquivo sujeito aos limites de segurança e às validações configuradas.",
+                )
+        with report_col:
+            st.button(
+                "Gerar relatório",
+                type="primary",
+                width="stretch",
+                on_click=navigate_to,
+                args=("Relatórios",),
+            )
+    return upload, period
 
 
-def render_active_filters_summary(primary_values, secondary_values, date_range, primary_label: str, secondary_label: str) -> None:
-    active_filters = []
-    if primary_values:
-        active_filters.append(f"🧭 {len(primary_values)} {primary_label}")
-    if secondary_values:
-        active_filters.append(f"📦 {len(secondary_values)} {secondary_label}")
-    if date_range and len(date_range) == 2:
-        start, end = date_range
-        active_filters.append(f"📅 {start.strftime('%d/%m/%Y')} → {end.strftime('%d/%m/%Y')}")
-    summary = " | ".join(active_filters) if active_filters else "Nenhum filtro avançado ativo"
-    st.info(f"Filtros ativos: {summary}")
+def render_filters(df):
+    filtered = df.copy()
+    with st.sidebar:
+        with st.popover("Filtros do recorte", width="stretch"):
+            stores = sorted(filtered["Loja"].dropna().astype(str).unique())
+            products = sorted(filtered["Produto"].dropna().astype(str).unique())
+            selected_stores = st.multiselect("Lojas", stores, key="selected_lojas")
+            selected_products = st.multiselect("Produtos", products, key="selected_produtos")
+            minimum, maximum = filtered["Data"].min().date(), filtered["Data"].max().date()
+            date_range = st.date_input(
+                "Intervalo personalizado",
+                value=(minimum, maximum),
+                min_value=minimum,
+                max_value=maximum,
+                key="selected_date_range",
+            )
+            st.button(
+                "Limpar filtros",
+                width="stretch",
+                on_click=clear_filter_state,
+            )
+
+    if selected_stores:
+        filtered = filtered[filtered["Loja"].astype(str).isin(selected_stores)]
+    if selected_products:
+        filtered = filtered[filtered["Produto"].astype(str).isin(selected_products)]
+    query = st.session_state.get("global_search", "").strip()
+    if query:
+        matches_store = filtered["Loja"].astype(str).str.contains(query, case=False, na=False)
+        matches_product = filtered["Produto"].astype(str).str.contains(query, case=False, na=False)
+        filtered = filtered[matches_store | matches_product]
+    if len(date_range) == 2:
+        start = pd.Timestamp(date_range[0])
+        end = pd.Timestamp(date_range[1]) + pd.Timedelta(days=1)
+        filtered = filtered[(filtered["Data"] >= start) & (filtered["Data"] < end)]
+    filtered.attrs = df.attrs.copy()
+    return filtered
 
 
-def get_schema_from_df(df: pd.DataFrame) -> dict:
-    try:
-        state = construir_analytics_state(df)
-        return state.get("schema", {}) or {}
-    except Exception:
-        return {}
+def render_anomaly_notice(df):
+    anomalies = detect_extreme_monetary_values(df)
+    if anomalies.empty:
+        return anomalies
+    st.warning(
+        financial_anomaly_notice(len(anomalies))
+    )
+    return anomalies
 
 
-def render_top_controls():
-    with st.container():
-        col_upload, col_periodo, col_debug = st.columns([3, 2, 1])
-        with col_upload:
-            arquivo_upload = st.file_uploader("📤 Carregar Excel ou CSV", type=["xlsx", "xls", "csv"], label_visibility="visible")
-        with col_periodo:
-            periodo = st.selectbox("🗓️ Período", ["Tudo", "Últimos 7 dias", "Últimos 30 dias", "Últimos 90 dias", "Ano atual"], key="selected_periodo")
-        with col_debug:
-            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-            st.toggle("Debug", key="debug_mode")
-    return arquivo_upload, periodo
-
-
-def render_header(origem_dados: str, schema: dict) -> None:
-    domain = schema.get("domain", "universal")
-    metric_column = schema.get("metric_column") or "métrica principal"
-    page_title = get_page_title(st.session_state.get("active_page", "Painel"))
-    render_html(
+def render_overview(df, analytics, source):
+    anomalies = detect_extreme_monetary_values(df)
+    anomaly_html = ""
+    if not anomalies.empty:
+        detail = financial_anomaly_notice(len(anomalies))
+        anomaly_html = (
+            f'<div class="fusion-anomaly" title="{escape_html(detail)}">'
+            f'{len(anomalies)} possíveis anomalias · mantidas nos cálculos</div>'
+        )
+    st.markdown(
         f"""
-        <div class="hero-block">
-            <div class="hero-eyebrow">DataFlow BI Automation</div>
-            <div class="main-title">{page_title}</div>
-            <div class="main-subtitle">
-                Plataforma inteligente de Business Intelligence para análise automática de planilhas,
-                geração de KPIs, visualizações executivas e insights estratégicos.
-                Domínio detectado: <strong>{domain}</strong>. Métrica principal:
-                <strong>{metric_column}</strong>.
-            </div>
-            <div class="source-card">📁 Fonte de dados: <strong>{origem_dados}</strong></div>
-        </div>
-        """
+        <div class="fusion-hero"><div><div class="fusion-greeting">Olá, {escape_html(display_name())}!</div>
+        <div class="fusion-subtitle">Aqui está o panorama completo do seu negócio</div></div>
+        <div class="fusion-hero-meta"><div class="source-chip">{escape_html(source)} · {len(df):,} registros</div>
+        {anomaly_html}</div></div>
+        """,
+        unsafe_allow_html=True,
     )
+    render_kpi_strip(analytics)
+    st.caption(analytics["comparison"].get("label", "Sem comparação temporal disponível"))
+    render_analytical_scope(analytics)
+    charts = analytics["charts"]
+    with st.container(key="overview-chart-grid"):
+        left, right = st.columns([2.05, 1])
+        with left:
+            with st.container(border=True):
+                scale_col, view_col = st.columns([1.35, 1])
+                with scale_col:
+                    log_scale = st.toggle(
+                        "Escala logarítmica",
+                        value=True,
+                        key="overview_log_scale",
+                        help="Mantém todos os valores e apenas altera a escala visual.",
+                    )
+                with view_col:
+                    revenue_view = st.segmented_control(
+                        "Visualização do faturamento",
+                        ("Completa", "Faixa típica"),
+                        default="Completa",
+                        key="overview_revenue_view",
+                        label_visibility="collapsed",
+                    )
+                revenue_data = charts["revenue_by_month"]
+                if revenue_view == "Faixa típica" and not anomalies.empty:
+                    typical_df = df.drop(index=anomalies["indice"], errors="ignore").copy()
+                    revenue_data = build_revenue_by_month(typical_df, "Data", "Faturamento")
+                    st.caption(
+                        "Visão complementar: as anomalias permanecem nos KPIs e na visão completa, "
+                        "mas são separadas somente neste gráfico para revelar a faixa típica."
+                    )
+                render_revenue_chart(revenue_data, log_scale=log_scale)
+        with right:
+            with st.container(border=True):
+                render_category_donut(df)
+
+    with st.container(key="overview-lower-grid"):
+        stores_col, products_col, ai_col = st.columns([1.25, 1.35, 1])
+        with stores_col:
+            with st.container(border=True):
+                render_store_chart(charts["revenue_by_store"], compact=True)
+        with products_col:
+            with st.container(border=True):
+                render_products_panel(analytics)
+        with ai_col:
+            with st.container(border=True):
+                render_ai_panel()
+
+    render_insight_row(analytics)
 
 
-def render_filters(df: pd.DataFrame, schema: dict) -> pd.DataFrame:
-    render_html(
-        """
-        <div class="section-header">
-            <div>
-                <div class="section-title">Filtros Inteligentes</div>
-                <div class="section-subtitle">Segmentação analítica adaptada automaticamente à planilha carregada.</div>
-            </div>
-        </div>
-        """
+def render_sales(df, analytics, source):
+    render_sales_dashboard(df, analytics, source)
+
+
+def render_products(df, analytics, source):
+    render_products_dashboard(df, source)
+
+
+def render_stores(df, analytics, source):
+    render_stores_dashboard(df, source)
+
+
+def render_quality(df, source, active_records):
+    render_quality_dashboard(df, source, active_records=active_records)
+
+
+def main():
+    st.set_page_config(
+        page_title="DataFlow Fusion Ultimate 2.0",
+        page_icon="DF",
+        layout="wide",
+        initial_sidebar_state="expanded",
     )
-
-    primary_col = schema.get("primary_dimension")
-    secondary_col = schema.get("secondary_dimension")
-    data_col = schema.get("date_column")
-    primary_label = primary_col or "Dimensão Principal"
-    secondary_label = secondary_col or "Dimensão Secundária"
-    df_filtrado = df.copy()
-
-    if data_col and data_col in df_filtrado.columns:
-        df_filtrado[data_col] = pd.to_datetime(df_filtrado[data_col], errors="coerce", dayfirst=True)
-
-    col1, col2, col3, col4 = st.columns([1.2, 1.2, 1.4, 0.7])
-    primary_selected = []
-    secondary_selected = []
-    date_range = None
-
-    with col1:
-        if primary_col and primary_col in df_filtrado.columns:
-            primary_options = sorted(df_filtrado[primary_col].dropna().astype(str).unique().tolist())
-            safe_session_list("selected_primary_dimension", primary_options)
-            primary_selected = st.multiselect(f"🧭 {primary_label}", options=primary_options, key="selected_primary_dimension")
-
-    with col2:
-        if secondary_col and secondary_col in df_filtrado.columns and secondary_col != primary_col:
-            secondary_options = sorted(df_filtrado[secondary_col].dropna().astype(str).unique().tolist())
-            safe_session_list("selected_secondary_dimension", secondary_options)
-            secondary_selected = st.multiselect(f"📦 {secondary_label}", options=secondary_options, key="selected_secondary_dimension")
-
-    with col3:
-        if data_col and data_col in df_filtrado.columns:
-            min_date = df_filtrado[data_col].min()
-            max_date = df_filtrado[data_col].max()
-            if pd.notnull(min_date) and pd.notnull(max_date):
-                date_range = st.date_input("📅 Intervalo de datas", value=(min_date.date(), max_date.date()), key="selected_date_range")
-
-    with col4:
-        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-        if st.button("🔄 Resetar", width="stretch"):
-            st.session_state["selected_primary_dimension"] = []
-            st.session_state["selected_secondary_dimension"] = []
-            if "selected_date_range" in st.session_state:
-                del st.session_state["selected_date_range"]
-            st.rerun()
-
-    if primary_selected and primary_col and primary_col in df_filtrado.columns:
-        df_filtrado = df_filtrado[df_filtrado[primary_col].astype(str).isin(primary_selected)]
-    if secondary_selected and secondary_col and secondary_col in df_filtrado.columns:
-        df_filtrado = df_filtrado[df_filtrado[secondary_col].astype(str).isin(secondary_selected)]
-    if date_range and len(date_range) == 2 and data_col and data_col in df_filtrado.columns:
-        start_date = pd.Timestamp(date_range[0])
-        end_date = pd.Timestamp(date_range[1]) + pd.Timedelta(days=1)
-        df_filtrado = df_filtrado[(df_filtrado[data_col] >= start_date) & (df_filtrado[data_col] < end_date)]
-
-    render_active_filters_summary(primary_selected, secondary_selected, date_range, primary_label, secondary_label)
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-    col_info1, col_info2, col_info3 = st.columns(3)
-    with col_info1:
-        st.metric("Registros filtrados", f"{len(df_filtrado):,}")
-    with col_info2:
-        st.metric("Colunas disponíveis", len(df_filtrado.columns))
-    with col_info3:
-        percentual = (len(df_filtrado) / len(df)) * 100 if len(df) > 0 else 0
-        st.metric("Base analisada", f"{percentual:.1f}%")
-    return df_filtrado
-
-
-def render_schema_warning(analytics_state: dict) -> None:
-    quality = analytics_state.get("quality", {})
-    warnings = quality.get("schema_warnings", []) or []
-    missing = quality.get("colunas_ausentes", []) or []
-    if warnings:
-        st.warning(" | ".join(warnings))
-    elif missing:
-        st.info("Colunas opcionais não detectadas: " + ", ".join(missing) + ". O dashboard continuará funcionando com os dados disponíveis.")
-
-
-def render_status_bar(df: pd.DataFrame, origem_dados: str, analytics_state: dict) -> None:
-    total_linhas = len(df)
-    total_colunas = len(df.columns)
-    ultima_atualizacao = datetime.now().strftime("%d/%m/%Y às %H:%M:%S")
-    quality = analytics_state.get("quality", {})
-    score_schema = quality.get("score_schema", 0)
-    render_html(
-        """
-        <div class="section-header">
-            <div>
-                <div class="section-title">Status Operacional</div>
-                <div class="section-subtitle">Resumo técnico da base carregada</div>
-            </div>
-        </div>
-        """
-    )
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.metric("Registros", f"{total_linhas:,}")
-    with col2:
-        st.metric("Colunas", total_colunas)
-    with col3:
-        st.metric("Origem", origem_dados)
-    with col4:
-        st.metric("Schema", f"{score_schema}%")
-    with col5:
-        st.metric("Atualização", ultima_atualizacao)
-    render_schema_warning(analytics_state)
-
-
-def render_debug_panel(df_filtrado: pd.DataFrame, analytics_state: dict) -> None:
-    if not st.session_state.get("debug_mode", False):
-        return
-    charts = analytics_state.get("charts", {})
-    st.divider()
-    st.subheader("🧪 DEBUG — Payload Universal")
-    st.write("DEBUG — DataFrame filtrado")
-    st.dataframe(df_filtrado, width="stretch")
-    for key in ["primary_dimension_summary", "secondary_dimension_summary", "revenue_by_month", "revenue_by_category"]:
-        st.write(f"DEBUG — {key}")
-        st.dataframe(charts.get(key, pd.DataFrame()), width="stretch")
-    st.write("DEBUG — Schema")
-    st.json(analytics_state.get("schema", {}))
-
-
-def render_report_page(df: pd.DataFrame, origem_dados: str, analytics_state: dict) -> None:
-    render_html(
-        """
-        <div class="section-header">
-            <div>
-                <div class="section-title">Relatórios Executivos</div>
-                <div class="section-subtitle">Visão consolidada para apresentação, análise e tomada de decisão.</div>
-            </div>
-        </div>
-        """
-    )
-    render_kpis(analytics_state)
-    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-    render_insights(analytics_state)
-    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-    render_status_bar(df, origem_dados, analytics_state)
-
-
-def render_export_page(analytics_state: dict) -> None:
-    render_html(
-        """
-        <div class="section-header">
-            <div>
-                <div class="section-title">Central de Exportações</div>
-                <div class="section-subtitle">Gere relatórios prontos para análise externa, envio ou arquivamento.</div>
-            </div>
-        </div>
-        """
-    )
-    col_excel, col_pdf = st.columns(2)
-    with col_excel:
-        excel_file = gerar_excel(analytics_state)
-        st.download_button("📥 Baixar Relatório Excel", data=excel_file, file_name="relatorio_dataflow.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch")
-    with col_pdf:
-        pdf_file = gerar_pdf(analytics_state)
-        st.download_button("📄 Baixar Relatório PDF", data=pdf_file, file_name="relatorio_dataflow.pdf", mime="application/pdf", width="stretch")
-
-
-def render_ai_if_enabled(analytics_state: dict) -> None:
-    if st.session_state.get("ai_enabled", True):
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-        render_ai_assistant(analytics_state)
-
-
-def main() -> None:
+    load_css()
     init_session_state()
-    arquivo_upload, periodo = render_top_controls()
-    df, origem_dados, erro = carregar_dados(arquivo_upload=arquivo_upload, periodo=periodo)
-
-    if erro:
-        render_sidebar()
-        st.error(erro)
+    st.html(preference_css(read_preferences(st.session_state)))
+    st.html(sidebar_layout_css())
+    page = render_sidebar()
+    upload, period = render_data_controls()
+    with st.spinner("Validando e preparando dados..."):
+        df, source, error = carregar_dados(
+            arquivo_upload=upload,
+            periodo=period,
+            cache=st.session_state.performance_cache,
+            telemetry=st.session_state.performance_telemetry,
+        )
+    if error:
+        st.error(error)
+        st.stop()
+    if df is None or df.empty:
+        st.info("Nenhum registro disponível para o período selecionado.")
         st.stop()
 
-    base_schema = get_schema_from_df(df)
-    render_sidebar(base_schema)
-    render_header(origem_dados, base_schema)
-    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+    filtered = render_filters(df)
+    if filtered.empty:
+        st.info("Nenhum registro corresponde aos filtros atuais.")
+        st.stop()
+    analytics, _analytics_key, _ = get_cached_analytics(
+        filtered,
+        st.session_state.performance_cache,
+        st.session_state.performance_telemetry,
+        construir_analytics_state,
+    )
+    render_sidebar_status(len(filtered))
 
-    df_filtrado = render_filters(df, base_schema)
-    analytics_state = construir_analytics_state(df_filtrado)
-    active_page = st.session_state["active_page"]
-    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-
-    if active_page == "Painel":
-        render_kpis(analytics_state)
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-        render_charts(metricas=analytics_state)
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-        render_insights(analytics_state)
-        render_ai_if_enabled(analytics_state)
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-        render_status_bar(df_filtrado, origem_dados, analytics_state)
-        render_table(df_filtrado)
-
-    elif active_page == "Performance":
-        render_kpis(analytics_state)
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-        render_charts(metricas=analytics_state)
-        render_ai_if_enabled(analytics_state)
-
-    elif active_page == "DimensaoSecundaria":
-        render_insights(analytics_state)
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-        render_table(df_filtrado)
-        render_ai_if_enabled(analytics_state)
-
-    elif active_page == "DimensaoPrincipal":
-        render_charts(metricas=analytics_state)
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-        render_table(df_filtrado)
-        render_ai_if_enabled(analytics_state)
-
-    elif active_page == "Relatorios":
-        render_report_page(df_filtrado, origem_dados, analytics_state)
-        render_ai_if_enabled(analytics_state)
-
-    elif active_page == "Exportacoes":
-        render_export_page(analytics_state)
-
-    render_debug_panel(df_filtrado, analytics_state)
-    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+    routes = {
+        "Visão Geral": lambda: render_overview(filtered, analytics, source),
+        "Análise de Vendas": lambda: render_sales(filtered, analytics, source),
+        "Produtos": lambda: render_products(filtered, analytics, source),
+        "Lojas": lambda: render_stores(filtered, analytics, source),
+        "Inteligência Artificial": lambda: (
+            page_header("Inteligência Artificial", "Assistente governado, opcional e sem respostas simuladas.", source),
+            render_ai_assistant(analytics),
+        ),
+        "Qualidade dos Dados": lambda: render_quality(df, source, len(filtered)),
+        "Relatórios": lambda: render_reports_dashboard(df, filtered, source),
+        "Configurações": lambda: render_settings_dashboard(df, source),
+    }
+    routes[page]()
 
 
 if __name__ == "__main__":

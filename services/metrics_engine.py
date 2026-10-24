@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation, localcontext
 from typing import Any
 
 import pandas as pd
 
-from services.schema_analyzer import analyze_schema, clean_numeric_series, parse_date_series
+from domain.models import AnalyticalKPIs, DataQualityReport, GrowthMetrics
+from domain.normalization import normalize_dataframe
+from domain.periods import split_equivalent_periods
+from domain.schema import resolve_column_name
 
 
 @dataclass(frozen=True)
@@ -16,219 +20,312 @@ class ColumnMap:
     faturamento: str | None
     quantidade: str | None
     pedido: str | None
-    categoria: str | None
+    categoria: str | None = None
+    lucro: str | None = None
 
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = df.columns.astype(str).str.strip()
-    return df
+    source_quality = df.attrs.get("quality_report")
+    result = normalize_dataframe(df)
+    if result.dataframe is not None:
+        if isinstance(source_quality, DataQualityReport):
+            result.dataframe.attrs["quality_report"] = source_quality
+        return result.dataframe
+    empty = pd.DataFrame(columns=df.columns)
+    empty.attrs["quality_report"] = result.quality
+    return empty
 
 
 def find_column(df: pd.DataFrame, possible_names: list[str]) -> str | None:
-    normalized_targets = {name.strip().lower() for name in possible_names}
+    targets = {resolve_column_name(name) for name in possible_names}
     for column in df.columns:
-        if str(column).strip().lower() in normalized_targets:
+        canonical = resolve_column_name(column)
+        if canonical and canonical in targets:
             return column
+
     return None
 
 
-def get_schema_analysis(df: pd.DataFrame) -> dict[str, Any]:
-    schema = analyze_schema(df)
-    return schema.to_dict() if hasattr(schema, "to_dict") else dict(schema)
+def get_column_map(df: pd.DataFrame) -> ColumnMap:
+    return ColumnMap(
+        data="Data" if "Data" in df.columns else None,
+        loja="Loja" if "Loja" in df.columns else None,
+        produto="Produto" if "Produto" in df.columns else None,
+        faturamento="Faturamento" if "Faturamento" in df.columns else None,
+        quantidade="Quantidade" if "Quantidade" in df.columns else None,
+        pedido="Pedido" if "Pedido" in df.columns else None,
+        categoria="Categoria" if "Categoria" in df.columns else None,
+        lucro="Lucro" if "Lucro" in df.columns else None,
+    )
 
 
-def get_column_map(df: pd.DataFrame, schema: dict[str, Any] | None = None) -> ColumnMap:
-    schema = schema or get_schema_analysis(df)
-
-    data = schema.get("date_column") or find_column(df, ["data", "date", "dt_venda", "data_venda"])
-    metric = schema.get("metric_column") or find_column(df, ["faturamento", "receita", "vendas", "valor", "total", "revenue", "valor_total"])
-
-    explicit_store = find_column(df, ["loja", "store", "unidade", "filial", "empresa", "pdv"])
-    explicit_product = find_column(df, ["produto", "product", "item", "sku", "descricao", "descrição"])
-
-    primary_dimension = schema.get("primary_dimension")
-    secondary_dimension = schema.get("secondary_dimension")
-
-    domain = schema.get("domain", "generico")
-    if domain in ["vendas", "estoque"] and explicit_store and explicit_product:
-        loja = explicit_store
-        produto = explicit_product
-    else:
-        loja = primary_dimension or explicit_store
-        produto = secondary_dimension or explicit_product
-
-    quantidade = find_column(df, ["quantidade", "qtd", "qtde", "volume", "itens", "qty", "quantity", "unidades"])
-    pedido = find_column(df, ["pedido", "id_pedido", "order_id", "venda", "id_venda", "ordem", "numero_pedido"])
-    categoria = schema.get("category_dimension") or find_column(df, ["categoria", "category", "segmento", "grupo", "tipo", "status", "departamento"])
-
-    dimensions = schema.get("dimension_columns", []) or []
-    if not produto:
-        for candidate in dimensions:
-            if candidate != loja:
-                produto = candidate
-                break
-
-    if categoria in [loja, produto, metric, data]:
-        categoria = None
-
-    return ColumnMap(data=data, loja=loja, produto=produto, faturamento=metric, quantidade=quantidade, pedido=pedido, categoria=categoria)
-
-
-def prepare_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, ColumnMap, dict[str, Any]]:
+def prepare_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, ColumnMap]:
     df = normalize_columns(df)
-    schema = get_schema_analysis(df)
-    columns = get_column_map(df, schema)
-
-    if columns.data and columns.data in df.columns:
-        df[columns.data] = parse_date_series(df[columns.data], columns.data)
-
-    if columns.faturamento and columns.faturamento in df.columns:
-        df[columns.faturamento] = clean_numeric_series(df[columns.faturamento]).fillna(0)
-
-    if columns.quantidade and columns.quantidade in df.columns:
-        df[columns.quantidade] = clean_numeric_series(df[columns.quantidade]).fillna(0)
-
-    for metric in schema.get("secondary_metrics", []) or []:
-        if metric and metric in df.columns:
-            df[metric] = clean_numeric_series(df[metric]).fillna(0)
-
-    if not columns.quantidade:
-        df["_Quantidade_Automatica"] = 1
-        columns = ColumnMap(columns.data, columns.loja, columns.produto, columns.faturamento, "_Quantidade_Automatica", columns.pedido, columns.categoria)
-
-    return df, columns, schema
+    columns = get_column_map(df)
+    return df, columns
 
 
 def safe_sum(df: pd.DataFrame, column: str | None) -> float:
     if not column or column not in df.columns:
         return 0.0
-    return float(clean_numeric_series(df[column]).fillna(0).sum())
+
+    return float(pd.to_numeric(df[column], errors="coerce").fillna(0).sum())
+
+
+def exact_decimal_sum(values: pd.Series) -> Decimal:
+    """Sum decimal representations without a lossy intermediate float conversion."""
+    numbers = []
+    for value in values.dropna():
+        try:
+            number = Decimal(str(value))
+        except InvalidOperation:
+            continue
+        if not number.is_nan():
+            numbers.append(number)
+    finite = [value for value in numbers if value.is_finite()]
+    integer_digits = max((value.adjusted() + 1 for value in finite), default=1)
+    fractional_digits = max((-value.as_tuple().exponent for value in finite), default=0)
+    with localcontext() as context:
+        context.prec = max(28, integer_digits + fractional_digits + len(str(len(numbers))) + 2)
+        return sum(numbers, Decimal("0"))
+
+
+def exact_revenue_ranking(df, dimension, revenue_column):
+    if not dimension or not revenue_column or df.empty:
+        return []
+    rows = [(str(name), exact_decimal_sum(group[revenue_column])) for name, group in df.groupby(dimension, dropna=False)]
+    return sorted(sorted(rows, key=lambda row: (row[0].casefold(), row[0])), key=lambda row: row[1], reverse=True)
 
 
 def safe_count_unique(df: pd.DataFrame, column: str | None) -> int:
     if not column or column not in df.columns:
         return 0
+
     return int(df[column].dropna().nunique())
 
 
 def calculate_growth(current: float, previous: float) -> float:
-    if previous == 0 and current > 0:
-        return 100.0
     if previous == 0:
         return 0.0
+
     return ((current - previous) / previous) * 100
 
 
-def split_current_previous_period(df: pd.DataFrame, data_col: str | None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    if not data_col or data_col not in df.columns:
-        midpoint = len(df) // 2
-        return df.iloc[midpoint:].copy(), df.iloc[:midpoint].copy()
-
-    valid_df = df.dropna(subset=[data_col]).sort_values(data_col).copy()
-    if valid_df.empty or len(valid_df) < 2:
-        return df.copy(), pd.DataFrame(columns=df.columns)
-
-    start_date = valid_df[data_col].min()
-    end_date = valid_df[data_col].max()
-    if pd.isna(start_date) or pd.isna(end_date) or start_date == end_date:
-        midpoint = len(valid_df) // 2
-        return valid_df.iloc[midpoint:].copy(), valid_df.iloc[:midpoint].copy()
-
-    midpoint_date = start_date + ((end_date - start_date) / 2)
-    previous_df = valid_df[valid_df[data_col] <= midpoint_date].copy()
-    current_df = valid_df[valid_df[data_col] > midpoint_date].copy()
-    return current_df, previous_df
+def split_current_previous_period(
+    df: pd.DataFrame,
+    data_col: str | None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    current, previous, _ = split_equivalent_periods(df, data_col)
+    return current, previous
 
 
-def build_revenue_by_month(df: pd.DataFrame, data_col: str | None, metric_col: str | None) -> pd.DataFrame:
-    if not data_col or not metric_col or data_col not in df.columns or metric_col not in df.columns:
+def build_revenue_by_month(
+    df: pd.DataFrame,
+    data_col: str | None,
+    faturamento_col: str | None,
+) -> pd.DataFrame:
+    if not data_col or not faturamento_col:
         return pd.DataFrame(columns=["periodo", "faturamento"])
 
     chart_df = df.dropna(subset=[data_col]).copy()
+
     if chart_df.empty:
         return pd.DataFrame(columns=["periodo", "faturamento"])
 
-    grouped = chart_df.groupby(pd.Grouper(key=data_col, freq="ME"))[metric_col].sum().reset_index().sort_values(data_col)
-    return grouped.rename(columns={data_col: "periodo", metric_col: "faturamento"})
+    grouped = (
+        chart_df.groupby(pd.Grouper(key=data_col, freq="ME"))[faturamento_col]
+        .sum()
+        .reset_index()
+        .sort_values(data_col)
+    )
+
+    grouped = grouped.rename(
+        columns={
+            data_col: "periodo",
+            faturamento_col: "faturamento",
+        }
+    )
+
+    return grouped
 
 
-def build_revenue_by_day(df: pd.DataFrame, data_col: str | None, metric_col: str | None) -> pd.DataFrame:
-    if not data_col or not metric_col or data_col not in df.columns or metric_col not in df.columns:
+def build_revenue_by_store(
+    df: pd.DataFrame,
+    loja_col: str | None,
+    faturamento_col: str | None,
+) -> pd.DataFrame:
+    if not loja_col or not faturamento_col:
+        return pd.DataFrame(columns=["loja", "faturamento"])
+
+    grouped = (
+        df.groupby(loja_col, dropna=False)[faturamento_col]
+        .sum()
+        .reset_index()
+        .sort_values(faturamento_col, ascending=True)
+    )
+
+    grouped = grouped.rename(
+        columns={
+            loja_col: "loja",
+            faturamento_col: "faturamento",
+        }
+    )
+
+    grouped["loja"] = grouped["loja"].fillna("Não informado").astype(str)
+
+    return grouped
+
+
+def build_top_products(
+    df: pd.DataFrame,
+    produto_col: str | None,
+    faturamento_col: str | None,
+    limit: int = 8,
+) -> pd.DataFrame:
+    if not produto_col or not faturamento_col:
+        return pd.DataFrame(columns=["produto", "faturamento"])
+
+    grouped = (
+        df.groupby(produto_col, dropna=False)[faturamento_col]
+        .sum()
+        .reset_index()
+        .sort_values(faturamento_col, ascending=False)
+        .head(limit)
+    )
+
+    grouped = grouped.rename(
+        columns={
+            produto_col: "produto",
+            faturamento_col: "faturamento",
+        }
+    )
+
+    grouped["produto"] = grouped["produto"].fillna("Não informado").astype(str)
+
+    return grouped
+
+
+def build_revenue_by_day(
+    df: pd.DataFrame,
+    data_col: str | None,
+    faturamento_col: str | None,
+) -> pd.DataFrame:
+    if not data_col or not faturamento_col:
         return pd.DataFrame(columns=["data", "faturamento"])
 
     valid_df = df.dropna(subset=[data_col]).copy()
+
     if valid_df.empty:
         return pd.DataFrame(columns=["data", "faturamento"])
 
-    grouped = valid_df.groupby(valid_df[data_col].dt.date)[metric_col].sum().reset_index().sort_values(data_col)
-    grouped = grouped.rename(columns={data_col: "data", metric_col: "faturamento"})
+    grouped = (
+        valid_df.groupby(valid_df[data_col].dt.date)[faturamento_col]
+        .sum()
+        .reset_index()
+        .sort_values(data_col)
+    )
+
+    grouped = grouped.rename(
+        columns={
+            data_col: "data",
+            faturamento_col: "faturamento",
+        }
+    )
+
     grouped["data"] = pd.to_datetime(grouped["data"], errors="coerce")
+
     return grouped
 
 
-def build_dynamic_dimension_summary(df: pd.DataFrame, dimension_col: str | None, metric_col: str | None, label_name: str = "dimensao", value_name: str = "valor", limit: int = 12, ascending: bool = False) -> pd.DataFrame:
-    if not dimension_col or not metric_col or dimension_col not in df.columns or metric_col not in df.columns:
-        return pd.DataFrame(columns=[label_name, value_name])
-
-    grouped = df.groupby(dimension_col, dropna=False)[metric_col].sum().reset_index().sort_values(metric_col, ascending=ascending).head(limit)
-    grouped = grouped.rename(columns={dimension_col: label_name, metric_col: value_name})
-    grouped[label_name] = grouped[label_name].fillna("Não informado").astype(str)
-    return grouped
-
-
-def build_revenue_by_store(df: pd.DataFrame, dimension_col: str | None, metric_col: str | None) -> pd.DataFrame:
-    return build_dynamic_dimension_summary(df, dimension_col, metric_col, label_name="loja", value_name="faturamento", limit=30, ascending=True)
-
-
-def build_top_products(df: pd.DataFrame, dimension_col: str | None, metric_col: str | None, limit: int = 8) -> pd.DataFrame:
-    return build_dynamic_dimension_summary(df, dimension_col, metric_col, label_name="produto", value_name="faturamento", limit=limit, ascending=False)
-
-
-def build_revenue_by_category(df: pd.DataFrame, category_col: str | None, metric_col: str | None) -> pd.DataFrame:
-    return build_dynamic_dimension_summary(df, category_col, metric_col, label_name="categoria", value_name="faturamento", limit=12, ascending=False)
-
-
-def get_top_record(df: pd.DataFrame, label_col: str, value_col: str, fallback_label: str = "Não informado") -> tuple[str, float]:
+def get_top_record(
+    df: pd.DataFrame,
+    label_col: str,
+    value_col: str,
+    fallback_label: str,
+) -> tuple[str, float]:
     if df.empty or label_col not in df.columns or value_col not in df.columns:
         return fallback_label, 0.0
+
     top_row = df.sort_values(value_col, ascending=False).iloc[0]
-    return str(top_row[label_col]), float(top_row[value_col])
+
+    label = str(top_row[label_col])
+    value = float(top_row[value_col])
+
+    return label, value
 
 
-def get_bottom_dimension_performance(summary_df: pd.DataFrame, label_col: str, value_col: str) -> tuple[str, float]:
-    if summary_df.empty or label_col not in summary_df.columns or value_col not in summary_df.columns:
+def get_bottom_store_performance(
+    revenue_by_store: pd.DataFrame,
+) -> tuple[str, float]:
+    if revenue_by_store.empty:
         return "Não informado", 100.0
-    avg_value = float(summary_df[value_col].mean())
-    if avg_value <= 0:
+
+    avg_revenue = float(revenue_by_store["faturamento"].mean())
+
+    if avg_revenue <= 0:
         return "Não informado", 100.0
-    bottom_row = summary_df.sort_values(value_col, ascending=True).iloc[0]
-    value = float(bottom_row[value_col])
-    return str(bottom_row[label_col]), (value / avg_value) * 100
+
+    bottom_row = revenue_by_store.sort_values("faturamento", ascending=True).iloc[0]
+
+    store_name = str(bottom_row["loja"])
+    store_value = float(bottom_row["faturamento"])
+
+    performance = (store_value / avg_revenue) * 100
+
+    return store_name, performance
 
 
-def calculate_core_metrics(df: pd.DataFrame, columns: ColumnMap, revenue_by_day: pd.DataFrame, revenue_by_category: pd.DataFrame, schema: dict[str, Any], primary_dimension_summary: pd.DataFrame, secondary_dimension_summary: pd.DataFrame) -> dict[str, Any]:
-    metric_col = schema.get("metric_column") or columns.faturamento
-    primary_dimension_col = schema.get("primary_dimension") or columns.loja
-    secondary_dimension_col = schema.get("secondary_dimension") or columns.produto
-    category_dimension_col = schema.get("category_dimension") or columns.categoria
-    domain = schema.get("domain", "generico")
-
-    faturamento_total = safe_sum(df, metric_col)
+def calculate_core_metrics(
+    df: pd.DataFrame,
+    columns: ColumnMap,
+    revenue_by_store: pd.DataFrame,
+    top_products: pd.DataFrame,
+    revenue_by_day: pd.DataFrame,
+) -> dict[str, Any]:
+    faturamento_total = safe_sum(df, columns.faturamento)
     quantidade_total = safe_sum(df, columns.quantidade)
-    total_pedidos = safe_count_unique(df, columns.pedido) if columns.pedido else len(df)
+
+    if columns.pedido:
+        total_pedidos = safe_count_unique(df, columns.pedido)
+    else:
+        total_pedidos = len(df)
+
     ticket_medio = faturamento_total / total_pedidos if total_pedidos > 0 else 0.0
+    lojas_ativas = safe_count_unique(df, columns.loja)
 
-    primary_dimension_count = safe_count_unique(df, primary_dimension_col)
-    secondary_dimension_count = safe_count_unique(df, secondary_dimension_col)
-    category_dimension_count = safe_count_unique(df, category_dimension_col)
+    melhor_loja, valor_melhor_loja = get_top_record(
+        revenue_by_store,
+        "loja",
+        "faturamento",
+        "Não informado",
+    )
 
-    top_primary_dimension, top_primary_dimension_value = get_top_record(primary_dimension_summary, "dimensao", "valor")
-    top_secondary_dimension, top_secondary_dimension_value = get_top_record(secondary_dimension_summary, "dimensao", "valor")
-    bottom_primary_dimension, bottom_primary_dimension_performance = get_bottom_dimension_performance(primary_dimension_summary, "dimensao", "valor")
+    pior_loja, desempenho_pior_loja = get_bottom_store_performance(revenue_by_store)
 
-    top_secondary_dimension_share = (top_secondary_dimension_value / faturamento_total) * 100 if faturamento_total > 0 else 0.0
-    melhor_categoria, valor_melhor_categoria = get_top_record(revenue_by_category, "categoria", "faturamento", "Categoria não identificada")
+    produto_top, valor_produto_top = get_top_record(
+        top_products,
+        "produto",
+        "faturamento",
+        "Não informado",
+    )
+
+    # Float chart aggregates are not a reliable ordering criterion for huge values.
+    store_ranking = exact_revenue_ranking(df, columns.loja, columns.faturamento)
+    product_ranking = exact_revenue_ranking(df, columns.produto, columns.faturamento)
+    if store_ranking:
+        melhor_loja, best_value = store_ranking[0]
+        worst_value = store_ranking[-1][1]
+        pior_loja = next(name for name, value in store_ranking if value == worst_value)
+        valor_melhor_loja = float(best_value)
+        exact_average = exact_decimal_sum(pd.Series([value for _, value in store_ranking])) / len(store_ranking)
+        desempenho_pior_loja = float(worst_value / exact_average * 100) if exact_average else 0.0
+    if product_ranking:
+        produto_top, top_value = product_ranking[0]
+        valor_produto_top = float(top_value)
+
+    participacao_produto_top = (
+        (valor_produto_top / faturamento_total) * 100 if faturamento_total > 0 else 0.0
+    )
 
     if revenue_by_day.empty:
         dia_top = pd.Timestamp.today()
@@ -238,169 +335,194 @@ def calculate_core_metrics(df: pd.DataFrame, columns: ColumnMap, revenue_by_day:
         dia_top = pd.to_datetime(day_row["data"], errors="coerce")
         valor_dia_top = float(day_row["faturamento"])
 
-    return {
-        "faturamento_total": faturamento_total,
-        "ticket_medio": ticket_medio,
-        "total_pedidos": total_pedidos,
-        "quantidade_total": quantidade_total,
-        "lojas_ativas": primary_dimension_count,
-        "primary_dimension_count": primary_dimension_count,
-        "secondary_dimension_count": secondary_dimension_count,
-        "category_dimension_count": category_dimension_count,
-        "top_primary_dimension": top_primary_dimension,
-        "top_primary_dimension_value": top_primary_dimension_value,
-        "top_secondary_dimension": top_secondary_dimension,
-        "top_secondary_dimension_value": top_secondary_dimension_value,
-        "top_secondary_dimension_share": top_secondary_dimension_share,
-        "bottom_primary_dimension": bottom_primary_dimension,
-        "bottom_primary_dimension_performance": bottom_primary_dimension_performance,
-        "melhor_loja": top_primary_dimension,
-        "valor_melhor_loja": top_primary_dimension_value,
-        "pior_loja": bottom_primary_dimension,
-        "desempenho_pior_loja": bottom_primary_dimension_performance,
-        "produto_top": top_secondary_dimension,
-        "valor_produto_top": top_secondary_dimension_value,
-        "participacao_produto_top": top_secondary_dimension_share,
-        "dia_top": dia_top,
-        "valor_dia_top": valor_dia_top,
-        "melhor_categoria": melhor_categoria,
-        "valor_melhor_categoria": valor_melhor_categoria,
-        "metric_column": metric_col,
-        "primary_dimension": primary_dimension_col,
-        "secondary_dimension": secondary_dimension_col,
-        "category_dimension": category_dimension_col,
-        "secondary_metrics": schema.get("secondary_metrics", []),
-        "domain": domain,
-        "schema_confidence": schema.get("confidence", 0),
-        "metric_confidence": schema.get("metric_confidence", 0),
-        "date_confidence": schema.get("date_confidence", 0),
-        "primary_dimension_confidence": schema.get("primary_dimension_confidence", 0),
-        "secondary_dimension_confidence": schema.get("secondary_dimension_confidence", 0),
-        "category_dimension_confidence": schema.get("category_dimension_confidence", 0),
-    }
+    model = AnalyticalKPIs(
+        total_revenue=faturamento_total,
+        average_ticket=ticket_medio,
+        total_orders=total_pedidos,
+        total_quantity=quantidade_total,
+        active_stores=lojas_ativas,
+        best_store=melhor_loja,
+        best_store_value=valor_melhor_loja,
+        worst_store=pior_loja,
+        worst_store_performance=desempenho_pior_loja,
+        top_product=produto_top,
+        top_product_value=valor_produto_top,
+        top_product_share=participacao_produto_top,
+        top_day=dia_top,
+        top_day_value=valor_dia_top,
+        ticket_methodology=(
+            "receita por pedido único"
+            if columns.pedido
+            else "receita por registro de venda"
+        ),
+    )
+    return model.to_legacy_dict()
 
 
-def calculate_growth_metrics(current_df: pd.DataFrame, previous_df: pd.DataFrame, columns: ColumnMap, schema: dict[str, Any]) -> dict[str, float]:
-    metric_col = schema.get("metric_column") or columns.faturamento
-    primary_dimension_col = schema.get("primary_dimension") or columns.loja
-    secondary_dimension_col = schema.get("secondary_dimension") or columns.produto
-    category_dimension_col = schema.get("category_dimension") or columns.categoria
+def calculate_growth_metrics(
+    current_df: pd.DataFrame,
+    previous_df: pd.DataFrame,
+    columns: ColumnMap,
+) -> dict[str, float]:
+    current_revenue = safe_sum(current_df, columns.faturamento)
+    previous_revenue = safe_sum(previous_df, columns.faturamento)
 
-    current_revenue = safe_sum(current_df, metric_col)
-    previous_revenue = safe_sum(previous_df, metric_col)
     current_quantity = safe_sum(current_df, columns.quantidade)
     previous_quantity = safe_sum(previous_df, columns.quantidade)
-    current_orders = safe_count_unique(current_df, columns.pedido) if columns.pedido else len(current_df)
-    previous_orders = safe_count_unique(previous_df, columns.pedido) if columns.pedido else len(previous_df)
+
+    current_orders = (
+        safe_count_unique(current_df, columns.pedido)
+        if columns.pedido
+        else len(current_df)
+    )
+    previous_orders = (
+        safe_count_unique(previous_df, columns.pedido)
+        if columns.pedido
+        else len(previous_df)
+    )
+
     current_ticket = current_revenue / current_orders if current_orders > 0 else 0.0
     previous_ticket = previous_revenue / previous_orders if previous_orders > 0 else 0.0
 
-    return {
-        "crescimento_faturamento": calculate_growth(current_revenue, previous_revenue),
-        "crescimento_ticket": calculate_growth(current_ticket, previous_ticket),
-        "crescimento_pedidos": calculate_growth(current_orders, previous_orders),
-        "crescimento_quantidade": calculate_growth(current_quantity, previous_quantity),
-        "crescimento_lojas": calculate_growth(safe_count_unique(current_df, primary_dimension_col), safe_count_unique(previous_df, primary_dimension_col)),
-        "crescimento_primary_dimension": calculate_growth(safe_count_unique(current_df, primary_dimension_col), safe_count_unique(previous_df, primary_dimension_col)),
-        "crescimento_secondary_dimension": calculate_growth(safe_count_unique(current_df, secondary_dimension_col), safe_count_unique(previous_df, secondary_dimension_col)),
-        "crescimento_category_dimension": calculate_growth(safe_count_unique(current_df, category_dimension_col), safe_count_unique(previous_df, category_dimension_col)),
-    }
+    current_stores = safe_count_unique(current_df, columns.loja)
+    previous_stores = safe_count_unique(previous_df, columns.loja)
+
+    model = GrowthMetrics(
+        revenue=calculate_growth(current_revenue, previous_revenue),
+        average_ticket=calculate_growth(current_ticket, previous_ticket),
+        orders=calculate_growth(current_orders, previous_orders),
+        quantity=calculate_growth(current_quantity, previous_quantity),
+        stores=calculate_growth(current_stores, previous_stores),
+        comparison_available=bool(len(current_df) > 0 and len(previous_df) > 0),
+    )
+    return model.to_legacy_dict()
 
 
-def build_quality_report(df: pd.DataFrame, columns: ColumnMap, schema: dict[str, Any]) -> dict[str, Any]:
+def build_quality_report(df: pd.DataFrame, columns: ColumnMap) -> dict[str, Any]:
+    imported_report = df.attrs.get("quality_report")
+    if isinstance(imported_report, DataQualityReport):
+        report = imported_report.to_dict()
+        report["linhas_analisadas"] = len(df)
+        report["colunas"] = len(df.columns)
+        return report
+
     required = {
-        "data": schema.get("date_column") or columns.data,
-        "dimensão principal": schema.get("primary_dimension") or columns.loja,
-        "dimensão secundária": schema.get("secondary_dimension") or columns.produto,
-        "métrica principal": schema.get("metric_column") or columns.faturamento,
-        "categoria": schema.get("category_dimension") or columns.categoria,
+        "data": columns.data,
+        "loja": columns.loja,
+        "produto": columns.produto,
+        "faturamento": columns.faturamento,
         "quantidade": columns.quantidade,
     }
+
     missing = [name for name, column in required.items() if not column]
-    return {
-        "linhas": len(df),
-        "colunas": len(df.columns),
-        "colunas_detectadas": required,
-        "colunas_ausentes": missing,
-        "score_schema": round(((len(required) - len(missing)) / len(required)) * 100, 1),
-        "schema_domain": schema.get("domain", "generico"),
-        "schema_confidence": schema.get("confidence", 0),
-        "metric_confidence": schema.get("metric_confidence", 0),
-        "date_confidence": schema.get("date_confidence", 0),
-        "primary_dimension_confidence": schema.get("primary_dimension_confidence", 0),
-        "secondary_dimension_confidence": schema.get("secondary_dimension_confidence", 0),
-        "category_dimension_confidence": schema.get("category_dimension_confidence", 0),
-        "secondary_metrics": schema.get("secondary_metrics", []),
-        "schema_warnings": schema.get("warnings", []),
-    }
+
+    model = DataQualityReport(
+        received_records=len(df),
+        valid_records=len(df),
+        discarded_records=0,
+        duplicate_records=0,
+        detected_fields=required,
+        missing_fields=tuple(missing),
+        rejection_reasons={},
+        schema_score=round(((len(required) - len(missing)) / len(required)) * 100, 1),
+    )
+    return {**model.to_dict(), "linhas_analisadas": len(df), "colunas": len(df.columns)}
 
 
-def build_kpi_cards(metricas: dict[str, Any], schema: dict[str, Any]) -> list[dict[str, Any]]:
-    domain = schema.get("domain", "generico")
-    metric_label = schema.get("metric_column") or "Métrica Principal"
-    primary_dimension = schema.get("primary_dimension") or "Dimensão Principal"
-    secondary_dimension = schema.get("secondary_dimension") or "Dimensão Secundária"
-    domain_badges = {"vendas": "Receita", "financeiro": "Financeiro", "rh": "RH", "estoque": "Estoque", "crm": "CRM", "projetos": "Projetos", "generico": "Universal"}
-
+def build_kpi_cards(metricas: dict[str, Any]) -> list[dict[str, Any]]:
     return [
-        {"icon": "💰" if domain in ["vendas", "financeiro"] else "📊", "title": f"Total de {metric_label}", "metric_key": "faturamento_total", "growth_key": "crescimento_faturamento", "badge": domain_badges.get(domain, "Métrica"), "featured": True},
-        {"icon": "🎯", "title": "Média por Registro", "metric_key": "ticket_medio", "growth_key": "crescimento_ticket", "badge": "Eficiência", "featured": True},
-        {"icon": "📄", "title": "Registros Analisados", "metric_key": "total_pedidos", "growth_key": "crescimento_pedidos", "badge": "Base", "featured": True},
-        {"icon": "🧮", "title": "Quantidade Total", "metric_key": "quantidade_total", "growth_key": "crescimento_quantidade", "badge": "Volume", "featured": False},
-        {"icon": "🧭", "title": f"Qtd. {primary_dimension}", "metric_key": "primary_dimension_count", "growth_key": "crescimento_primary_dimension", "badge": "Dimensão", "featured": False},
-        {"icon": "🏆", "title": f"Top {secondary_dimension}", "metric_key": "top_secondary_dimension", "growth_key": None, "badge": "Ranking", "featured": False},
-        {"icon": "🥇", "title": f"Top {primary_dimension}", "metric_key": "top_primary_dimension", "growth_key": None, "badge": "Destaque", "featured": False},
-        {"icon": "🧠", "title": "Domínio Detectado", "metric_key": "domain", "growth_key": None, "badge": "Schema", "featured": False},
+        {
+            "icon": "💰",
+            "title": "Faturamento Total",
+            "metric_key": "faturamento_total",
+            "growth_key": "crescimento_faturamento",
+            "badge": "Receita",
+            "featured": True,
+        },
+        {
+            "icon": "🎯",
+            "title": "Ticket Médio",
+            "metric_key": "ticket_medio",
+            "growth_key": "crescimento_ticket",
+            "badge": "Eficiência",
+            "featured": True,
+        },
+        {
+            "icon": "📦",
+            "title": "Pedidos",
+            "metric_key": "total_pedidos",
+            "growth_key": "crescimento_pedidos",
+            "badge": "Pedidos",
+            "featured": True,
+        },
+        {
+            "icon": "🛒",
+            "title": "Quantidade Vendida",
+            "metric_key": "quantidade_total",
+            "growth_key": "crescimento_quantidade",
+            "badge": "Volume",
+            "featured": False,
+        },
+        {
+            "icon": "🏪",
+            "title": "Lojas Ativas",
+            "metric_key": "lojas_ativas",
+            "growth_key": "crescimento_lojas",
+            "badge": "Cobertura",
+            "featured": False,
+        },
     ]
 
 
 def construir_analytics_state(df: pd.DataFrame) -> dict[str, Any]:
-    prepared_df, columns, schema = prepare_dataframe(df)
+    prepared_df, columns = prepare_dataframe(df)
 
-    primary_dimension = columns.loja or schema.get("primary_dimension")
-    secondary_dimension = columns.produto or schema.get("secondary_dimension")
-    category_dimension = columns.categoria or schema.get("category_dimension")
-    metric_column = columns.faturamento or schema.get("metric_column")
+    revenue_by_month = build_revenue_by_month(
+        prepared_df,
+        columns.data,
+        columns.faturamento,
+    )
+    revenue_by_store = build_revenue_by_store(
+        prepared_df,
+        columns.loja,
+        columns.faturamento,
+    )
+    top_products = build_top_products(
+        prepared_df,
+        columns.produto,
+        columns.faturamento,
+    )
+    revenue_by_day = build_revenue_by_day(
+        prepared_df,
+        columns.data,
+        columns.faturamento,
+    )
 
-    if category_dimension in [primary_dimension, secondary_dimension, metric_column, columns.data]:
-        category_dimension = None
+    metricas = calculate_core_metrics(
+        prepared_df,
+        columns,
+        revenue_by_store,
+        top_products,
+        revenue_by_day,
+    )
+    exact_revenue = exact_decimal_sum(prepared_df[columns.faturamento]) if columns.faturamento else Decimal("0")
+    order_denominator = metricas["total_pedidos"]
+    metricas["faturamento_total_exato"] = exact_revenue
+    metricas["ticket_medio_exato"] = exact_revenue / order_denominator if order_denominator else Decimal("0")
 
-    final_schema = {
-        **schema,
-        "metric_column": metric_column,
-        "date_column": columns.data or schema.get("date_column"),
-        "primary_dimension": primary_dimension,
-        "secondary_dimension": secondary_dimension,
-        "category_dimension": category_dimension,
-        "store_dimension": primary_dimension,
-        "product_dimension": secondary_dimension,
-    }
+    current_df, previous_df, comparison = split_equivalent_periods(prepared_df, columns.data)
+    growth_metrics = calculate_growth_metrics(current_df, previous_df, columns)
 
-    revenue_by_month = build_revenue_by_month(prepared_df, final_schema.get("date_column"), metric_column)
-    revenue_by_store = build_revenue_by_store(prepared_df, primary_dimension, metric_column)
-    top_products = build_top_products(prepared_df, secondary_dimension, metric_column)
-    revenue_by_day = build_revenue_by_day(prepared_df, final_schema.get("date_column"), metric_column)
-    revenue_by_category = build_revenue_by_category(prepared_df, category_dimension, metric_column)
-    primary_dimension_summary = build_dynamic_dimension_summary(prepared_df, primary_dimension, metric_column, label_name="dimensao", value_name="valor", limit=12)
-    secondary_dimension_summary = build_dynamic_dimension_summary(prepared_df, secondary_dimension, metric_column, label_name="dimensao", value_name="valor", limit=12)
-    category_dimension_summary = build_dynamic_dimension_summary(prepared_df, category_dimension, metric_column, label_name="dimensao", value_name="valor", limit=12)
-
-    metricas = calculate_core_metrics(prepared_df, columns, revenue_by_day, revenue_by_category, final_schema, primary_dimension_summary, secondary_dimension_summary)
-    current_df, previous_df = split_current_previous_period(prepared_df, final_schema.get("date_column"))
-    metricas.update(calculate_growth_metrics(current_df, previous_df, columns, final_schema))
+    metricas.update(growth_metrics)
 
     charts = {
         "revenue_by_month": revenue_by_month,
         "revenue_by_store": revenue_by_store,
         "top_products": top_products,
         "revenue_by_day": revenue_by_day,
-        "revenue_by_category": revenue_by_category,
-        "primary_dimension_summary": primary_dimension_summary,
-        "secondary_dimension_summary": secondary_dimension_summary,
-        "category_dimension_summary": category_dimension_summary,
     }
 
-    quality = build_quality_report(prepared_df, columns, final_schema)
+    quality = build_quality_report(prepared_df, columns)
 
     return {
         **metricas,
@@ -408,9 +530,13 @@ def construir_analytics_state(df: pd.DataFrame) -> dict[str, Any]:
         "charts": charts,
         "quality": quality,
         "columns": columns,
-        "schema": final_schema,
+        "kpi_cards": build_kpi_cards(metricas),
         "prepared_df": prepared_df,
-        "kpi_cards": build_kpi_cards(metricas, final_schema),
+        "comparison": comparison.to_dict(),
+        "typed": {
+            "comparison": comparison,
+            "quality": prepared_df.attrs.get("quality_report"),
+        },
     }
 
 

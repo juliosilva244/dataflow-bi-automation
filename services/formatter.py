@@ -1,36 +1,34 @@
-import pandas as pd
+def moeda_integral(value):
+    """Decimal text without rounding, including the reference fraction of a ticket."""
+    integer, _, fraction = format(value, "f").partition(".")
+    grouped = f"{int(integer):,}".replace(",", ".")
+    if integer.startswith("-") and int(integer) == 0:
+        grouped = "-" + grouped
+    return "R$ " + grouped + "," + fraction.ljust(2, "0")
 
-def sanitize_numeric(value):
-    if pd.isna(value) or value is None:
-        return 0
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return 0
 
-def format_currency(value):
-    value = sanitize_numeric(value)
-    return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+def moeda(valor):
+    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-def format_percent(value):
-    value = sanitize_numeric(value)
-    return f"{value:.2f}%".replace(".", ",")
 
-def format_number(value):
-    value = sanitize_numeric(value)
-    return f"{value:,.0f}".replace(",", ".")
+def numero(valor):
+    numeric = float(valor)
+    if numeric.is_integer():
+        return f"{int(numeric):,}".replace(",", ".")
+    return f"{numeric:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-def safe_divide(numerator, denominator):
-    numerator = sanitize_numeric(numerator)
-    denominator = sanitize_numeric(denominator)
-    if denominator == 0:
-        return 0
-    return numerator / denominator
 
 def moeda_resumida(valor):
-    valor = sanitize_numeric(valor)
-    if valor >= 1_000_000:
-        return f"R$ {valor / 1_000_000:,.2f}M".replace(",", "X").replace(".", ",").replace("X", ".")
-    if valor >= 1_000:
-        return f"R$ {valor / 1_000:,.2f}K".replace(",", "X").replace(".", ",").replace("X", ".")
-    return format_currency(valor)
+    scales = (
+        (1_000_000_000_000_000_000, "qi"),
+        (1_000_000_000_000_000, "qua"),
+        (1_000_000_000_000, "tri"),
+        (1_000_000_000, "bi"),
+        (1_000_000, "mi"),
+        (1_000, "mil"),
+    )
+    for divisor, suffix in scales:
+        if abs(valor) >= divisor:
+            return f"R$ {valor / divisor:.2f} {suffix}".replace(".", ",")
+
+    return moeda(valor)

@@ -1,108 +1,147 @@
+from __future__ import annotations
+
+import unicodedata
+from dataclasses import dataclass
+
 import streamlit as st
 
+from services.llm_router import get_llm_router
 
-def render_sidebar(schema: dict | None = None):
-    schema = schema or {}
+PRODUCT_VERSION = "2.0"
 
-    primary_dimension = schema.get("primary_dimension") or "Dimensão Principal"
-    secondary_dimension = schema.get("secondary_dimension") or "Dimensão Secundária"
 
-    if "active_page" not in st.session_state:
-        st.session_state["active_page"] = "Painel"
+@dataclass(frozen=True)
+class NavigationItem:
+    page: str
+    description: str
+    icon: str
+    key: str
+    terms: tuple[str, ...] = ()
 
-    if "ai_enabled" not in st.session_state:
-        st.session_state["ai_enabled"] = True
 
-    if "ai_mode" not in st.session_state:
-        st.session_state["ai_mode"] = "Executivo"
+NAVIGATION_GROUPS: tuple[tuple[str, str, tuple[NavigationItem, ...]], ...] = (
+    ("PAINEL PRINCIPAL", "cyan", (
+        NavigationItem("Visão Geral", "Panorama completo do negócio", ":material/dashboard:", "overview", ("dashboard", "kpi", "indicadores")),
+        NavigationItem("Análise de Vendas", "Desempenho e tendências", ":material/monitoring:", "sales", ("vendas", "receita", "faturamento", "tendencias")),
+        NavigationItem("Produtos", "Portfólio e performance", ":material/deployed_code:", "products", ("produto", "portfolio", "ranking")),
+        NavigationItem("Lojas", "Desempenho das unidades", ":material/storefront:", "stores", ("loja", "unidade", "rede")),
+    )),
+    ("INTELIGÊNCIA", "violet", (
+        NavigationItem("Inteligência Artificial", "Análises e insights avançados", ":material/psychology:", "ai", ("ia", "assistente", "insights")),
+        NavigationItem("Qualidade dos Dados", "Diagnóstico e confiabilidade", ":material/verified_user:", "quality", ("auditoria", "qualidade", "governanca", "confiabilidade")),
+    )),
+    ("RELATÓRIOS", "cyan", (
+        NavigationItem("Relatórios", "Exportações e relatórios analíticos", ":material/analytics:", "reports", ("pdf", "excel", "csv", "exportacao")),
+    )),
+    ("SISTEMA", "ice", (
+        NavigationItem("Configurações", "Preferências e administração", ":material/settings:", "settings", ("configuracao", "preferencias", "administracao")),
+    )),
+)
 
+PAGES = tuple(item.page for _, _, items in NAVIGATION_GROUPS for item in items)
+PAGE_ITEMS = {item.page: item for _, _, items in NAVIGATION_GROUPS for item in items}
+
+
+def _normalize(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value)).encode("ascii", "ignore").decode()
+    return " ".join(normalized.casefold().split())
+
+
+def search_navigation(query: str) -> tuple[str, ...]:
+    needle = _normalize(query)
+    if not needle:
+        return PAGES
+    matches = []
+    for page in PAGES:
+        item = PAGE_ITEMS[page]
+        haystack = _normalize(" ".join((item.page, item.description, *item.terms)))
+        if needle in haystack:
+            matches.append(page)
+    return tuple(matches)
+
+
+def set_active_page(page: str) -> None:
+    if page not in PAGES:
+        raise ValueError("Página de navegação inválida.")
+    st.session_state.active_page = page
+
+
+def sidebar_layout_css() -> str:
+    """Size the open native sidebar without creating a second collapse state."""
+    return """<style>
+    [data-testid="stSidebar"][aria-expanded="true"] {
+      width:318px!important;
+      min-width:318px!important;
+      max-width:318px!important;
+    }
+    [data-testid="stSidebar"]>div:first-child {
+      width:100%!important;
+      min-width:0!important;
+      max-width:100%!important;
+    }
+    [data-testid="stSidebarCollapseButton"] {
+      visibility:visible!important;
+    }
+    </style>"""
+
+
+def _navigation_label(item: NavigationItem) -> str:
+    return f"{item.page}\n{item.description}"
+
+
+def _render_brand() -> None:
+    st.html("""
+    <div class="sidebar-space-brand">
+      <div class="sidebar-stars" aria-hidden="true"></div><div class="sidebar-planet" aria-hidden="true"></div>
+      <div class="sidebar-brand-row"><div class="sidebar-df" aria-label="Logotipo DataFlow">DF</div>
+      <div class="sidebar-brand-copy"><strong>Fusão de<br>Fluxo de Dados</strong><span>ULTIMATE 2.0</span></div></div>
+    </div>""")
+
+
+def render_sidebar():
     with st.sidebar:
-        st.markdown(
-            "<div style='display:flex;align-items:center;gap:12px;margin-bottom:22px;padding:10px 0 4px 0;'>"
-            "<div style='width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,rgba(14,165,233,0.25),rgba(56,189,248,0.08));border:1px solid rgba(56,189,248,0.35);font-size:1.75rem;box-shadow:0 0 24px rgba(14,165,233,0.16);'>📊</div>"
-            "<div>"
-            "<div style='font-size:1.05rem;line-height:1.15;font-weight:900;color:#ffffff;letter-spacing:-0.02em;'>DataFlow BI<br>Automation</div>"
-            "<div style='margin-top:6px;font-size:0.62rem;line-height:1.35;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;font-weight:700;'>Business Intelligence<br>Analytics Platform</div>"
-            "</div>"
-            "</div>"
-            "<div style='height:1px;width:100%;background:linear-gradient(90deg,rgba(14,165,233,0.55),rgba(255,255,255,0.06));margin:10px 0 22px 0;'></div>",
-            unsafe_allow_html=True,
+        st.radio("Navegação principal", PAGES, key="active_page", label_visibility="collapsed")
+        _render_brand()
+        st.html('<div class="sidebar-search-wrap"><span>Busca de navegação</span></div>')
+        query = st.text_input("Buscar no menu", key="sidebar_menu_search", placeholder="Buscar no menu...", label_visibility="collapsed", icon=":material/search:")
+        matches = set(search_navigation(query))
+        rendered = 0
+        for group, color, items in NAVIGATION_GROUPS:
+            visible = [item for item in items if item.page in matches]
+            if not visible:
+                continue
+            st.html(f'<div class="sidebar-group {color}"><span>{group}</span><i></i></div>')
+            for item in visible:
+                active = st.session_state.get("active_page") == item.page
+                st.button(_navigation_label(item), icon=item.icon, key=f"nav_{item.key}", help=f"{item.page}: {item.description}", on_click=set_active_page, args=(item.page,), width="stretch", type="primary" if active else "secondary")
+                rendered += 1
+        if not rendered:
+            st.html('<div class="sidebar-empty"><strong>Nenhuma página encontrada</strong><span>Tente vendas, produto, auditoria, PDF ou IA.</span></div>')
+    return st.session_state.active_page
+
+
+def _timing(measurement):
+    cache = " · cache" if measurement.get("cache_hit") else ""
+    return f"{measurement.get('duration_ms', 0):.1f} ms{cache}"
+
+
+def render_sidebar_status(rows):
+    with st.sidebar:
+        telemetry = st.session_state.get("performance_telemetry")
+        latest = getattr(telemetry, "latest", {})
+        st.html('<div class="sidebar-status-rule"></div>')
+        st.caption("ESTADO VERIFICADO")
+        st.markdown(f'<div class="verified-data"><span>Base ativa</span><strong>{rows:,} registros</strong></div>', unsafe_allow_html=True)
+        for label, measurement in (("Carga", latest.get("carregamento")), ("Análise", latest.get("agregacao")), ("Exportação", latest.get("exportacao"))):
+            if measurement:
+                st.markdown(f'<div class="verified-row"><span>{label}</span><strong>{_timing(measurement)}</strong></div>', unsafe_allow_html=True)
+        router = get_llm_router(
+            api_key=st.session_state.get("groq_api_key", ""),
+            rate_limiter=st.session_state.get("ai_rate_limiter"),
         )
-
-        st.markdown("### Navegação")
-
-        pages = {
-            "Painel": "🏠 Painel Executivo",
-            "Performance": "📈 Desempenho",
-            "DimensaoSecundaria": f"📦 {secondary_dimension}",
-            "DimensaoPrincipal": f"🏬 {primary_dimension}",
-            "Relatorios": "📄 Relatórios",
-            "Exportacoes": "📤 Exportações",
-        }
-
-        for page_id, page_name in pages.items():
-            is_active = st.session_state.get("active_page") == page_id
-
-            if st.button(
-                page_name,
-                key=f"nav_{page_id}",
-                width="stretch",
-                type="primary" if is_active else "secondary",
-            ):
-                st.session_state["active_page"] = page_id
-                st.rerun()
-
-        st.markdown(
-            "<div style='height:1px;width:100%;background:rgba(255,255,255,0.08);margin:22px 0;'></div>",
-            unsafe_allow_html=True,
-        )
-
-        st.markdown("### Assistente de IA")
-
-        st.selectbox(
-            "Modo Analítico",
-            ["Executivo", "Operacional", "Previsão", "Anomalias"],
-            key="ai_mode",
-        )
-
-        st.toggle("Ativar Assistente de IA", key="ai_enabled")
-
-        if st.session_state.get("ai_enabled"):
-            st.markdown(
-                "<div style='background:linear-gradient(135deg,rgba(14,165,233,0.16),rgba(15,23,42,0.55));border:1px solid rgba(14,165,233,0.35);border-radius:14px;padding:14px;margin-top:12px;box-shadow:0 0 22px rgba(14,165,233,0.10);'>"
-                "<div style='font-size:0.78rem;font-weight:900;color:#38bdf8;margin-bottom:6px;'>🟢 DataFlow AI Analyst</div>"
-                "<div style='font-size:0.68rem;color:#94a3b8;line-height:1.45;'>Assistente analítico conectado para apoiar leitura de dados, identificação de padrões e geração de insights executivos.</div>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                "<div style='background:rgba(248,113,113,0.10);border:1px solid rgba(248,113,113,0.25);border-radius:14px;padding:14px;margin-top:12px;'>"
-                "<div style='font-size:0.78rem;font-weight:900;color:#f87171;margin-bottom:6px;'>🔴 DataFlow AI Offline</div>"
-                "<div style='font-size:0.68rem;color:#94a3b8;line-height:1.45;'>O assistente de IA está desativado.</div>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-
-        st.markdown(
-            "<div style='height:1px;width:100%;background:rgba(255,255,255,0.08);margin:22px 0;'></div>",
-            unsafe_allow_html=True,
-        )
-
-        st.markdown("### Tempo de execução")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.metric("Latência", "0.3s")
-
-        with col2:
-            st.metric("Status", "Online")
-
-        st.markdown(
-            "<div style='margin-top:22px;padding:12px 10px;border-radius:14px;background:rgba(15,23,42,0.45);border:1px solid rgba(148,163,184,0.14);text-align:center;'>"
-            "<div style='font-size:0.68rem;color:#94a3b8;font-weight:700;margin-bottom:3px;'>DataFlow BI Automation</div>"
-            "<div style='font-size:0.62rem;color:#64748b;line-height:1.35;'>Universal Analytics Runtime v3.1<br>Portfolio BI Platform</div>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
+        ai_enabled = bool(st.session_state.get("ai_enabled", False))
+        ai_state = "IA opcional não configurada" if not router.is_configured() else ("IA desativada" if not ai_enabled else "IA sujeita a consentimento")
+        st.html(f"""<div class="sidebar-system-card"><b aria-hidden="true"></b>
+        <div class="sidebar-status-copy"><strong>Aplicação ativa</strong><span>DataFlow Fusion Ultimate 2.0</span><small>{ai_state}</small></div><em>{PRODUCT_VERSION}</em></div>""")
+        if not router.is_configured():
+            st.info("Dashboard operacional sem IA; provedor não configurado.")

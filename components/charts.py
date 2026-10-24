@@ -1,68 +1,70 @@
+import math
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from assets.styles import DESIGN_TOKENS
+from services.formatter import moeda
 from services.metrics_engine import construir_analytics_state
-from services.formatter import format_currency, format_percent
 
 
-def chart_container_start() -> None:
-    st.markdown('<div class="chart-card">', unsafe_allow_html=True)
+def _compact_currency(value, include_symbol=True):
+    scales = (
+        (1e21, "sx"),
+        (1e18, "qi"),
+        (1e15, "qua"),
+        (1e12, "tri"),
+        (1e9, "bi"),
+        (1e6, "mi"),
+        (1e3, "mil"),
+    )
+    for divisor, suffix in scales:
+        if abs(value) >= divisor:
+            amount = value / divisor
+            compact = f"{amount:.0f} {suffix}" if amount >= 10 else f"{amount:.1f} {suffix}".replace(".", ",")
+            return f"R$ {compact}" if include_symbol else compact
+    compact = f"{value:.0f}"
+    return f"R$ {compact}" if include_symbol else compact
 
 
-def chart_container_end() -> None:
-    st.markdown("</div>", unsafe_allow_html=True)
+def _log_currency_ticks(series, count=6):
+    positive = pd.to_numeric(series, errors="coerce")
+    positive = positive[positive > 0]
+    if positive.empty:
+        return None, None
+    low, high = math.floor(math.log10(positive.min())), math.floor(math.log10(positive.max()))
+    step = max(1, math.ceil((high - low) / max(1, count - 1)))
+    ticks = [10**exponent for exponent in range(low, high + 1, step)]
+    return ticks, [_compact_currency(value, include_symbol=False) for value in ticks]
 
 
-def render_section_header() -> None:
+def chart_container_start():
     st.markdown(
         """
-        <div class="section-header charts-section-header">
-            <div>
-                <div class="section-title">Análise Visual Inteligente</div>
-                <div class="section-subtitle">
-                    Gráficos adaptados automaticamente ao schema da planilha carregada
-                </div>
-            </div>
-        </div>
-        """,
+<div class="chart-card">
+""",
         unsafe_allow_html=True,
     )
 
 
-def prepare_numeric_column(df: pd.DataFrame, column: str) -> pd.DataFrame:
-    df = df.copy()
-
-    if column in df.columns:
-        df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0)
-
-    return df
+def chart_container_end():
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
-def add_value_columns(
-    df: pd.DataFrame,
-    value_col: str,
-    scaled_col: str = "valor_milhoes",
-) -> pd.DataFrame:
-    df = df.copy()
-    df[scaled_col] = df[value_col] / 1_000_000
-    df["label"] = df[value_col].apply(format_currency)
-    return df
-
-
-def apply_layout(fig, title: str, height: int = 390):
+def apply_layout(fig, title, height=380):
     fig.update_layout(
         title=dict(
             text=title,
             x=0.03,
             xanchor="left",
-            font=dict(size=19, color="white"),
+            font=dict(size=20, color="white"),
         ),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="white", family="Inter"),
-        margin=dict(l=28, r=42, t=58, b=46),
+        margin=dict(l=18, r=18, t=58, b=22),
         hoverlabel=dict(
             bgcolor="#0F172A",
             bordercolor="#22D3EE",
@@ -77,160 +79,93 @@ def apply_layout(fig, title: str, height: int = 390):
         ),
         yaxis=dict(
             showgrid=True,
-            gridcolor="rgba(148,163,184,0.12)",
+            gridcolor="rgba(148,163,184,0.08)",
             zeroline=False,
             color="#CBD5E1",
             tickfont=dict(size=11),
         ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+        ),
         height=height,
-        showlegend=False,
     )
 
     return fig
 
 
-def get_schema(metricas: dict | None = None) -> dict:
-    if metricas and isinstance(metricas, dict):
-        return metricas.get("schema", {}) or {}
-    return {}
-
-
-def get_metric_label(metricas: dict | None = None) -> str:
-    schema = get_schema(metricas)
-    return schema.get("metric_column") or "Métrica Principal"
-
-
-def get_primary_dimension_label(metricas: dict | None = None) -> str:
-    schema = get_schema(metricas)
-    return schema.get("primary_dimension") or "Dimensão Principal"
-
-
-def get_secondary_dimension_label(metricas: dict | None = None) -> str:
-    schema = get_schema(metricas)
-    return schema.get("secondary_dimension") or "Dimensão Secundária"
-
-
-def render_revenue_chart(chart_df: pd.DataFrame, metric_label: str = "Métrica") -> None:
+def render_revenue_chart(chart_df: pd.DataFrame, log_scale=False):
     if chart_df is None or chart_df.empty:
-        st.info("Não há dados temporais suficientes para montar a evolução.")
+        st.warning("Não há dados válidos para montar o gráfico de faturamento.")
         return
 
-    df_plot = chart_df.copy()
-
-    if "periodo" not in df_plot.columns or "faturamento" not in df_plot.columns:
-        st.info("As colunas necessárias para a evolução temporal não foram encontradas.")
+    chart_df = chart_df.copy()
+    chart_df["periodo"] = pd.to_datetime(chart_df["periodo"], errors="coerce")
+    chart_df["faturamento"] = pd.to_numeric(chart_df["faturamento"], errors="coerce")
+    chart_df = chart_df.dropna(subset=["periodo"])
+    chart_df["faturamento"] = chart_df["faturamento"].where(chart_df["faturamento"].map(math.isfinite))
+    if chart_df.empty or chart_df["faturamento"].notna().sum() == 0:
+        st.info("Não há datas e valores finitos para mostrar neste recorte.")
         return
-
-    df_plot["periodo"] = pd.to_datetime(df_plot["periodo"], errors="coerce")
-    df_plot = prepare_numeric_column(df_plot, "faturamento")
-    df_plot = df_plot.dropna(subset=["periodo"]).sort_values("periodo")
-    df_plot = df_plot[df_plot["faturamento"] > 0]
-
-    if df_plot.empty:
-        st.info("Não há valores válidos para montar a evolução temporal.")
-        return
-
-    df_plot = add_value_columns(df_plot, "faturamento")
+    if log_scale and chart_df["faturamento"].le(0).any():
+        st.info("Escala linear aplicada: este recorte contém zero ou valores negativos, incompatíveis com logaritmos.")
+        log_scale = False
 
     fig = go.Figure()
 
     fig.add_trace(
         go.Scatter(
-            x=df_plot["periodo"],
-            y=df_plot["valor_milhoes"],
+            x=chart_df["periodo"],
+            y=chart_df["faturamento"],
+            customdata=chart_df["faturamento"].map(moeda),
             mode="lines+markers",
-            line=dict(color="#38BDF8", width=4, shape="spline", smoothing=1.15),
+            connectgaps=False,
+            line=dict(
+                color=DESIGN_TOKENS["cyan"],
+                width=3,
+                shape="linear",
+            ),
             marker=dict(
                 size=8,
                 color="#7DD3FC",
                 line=dict(width=2, color="#E0F2FE"),
             ),
-            fill="tozeroy",
-            fillcolor="rgba(56,189,248,0.18)",
-            customdata=df_plot[["label"]],
             hovertemplate=(
-                "<b>%{x|%m/%Y}</b><br>"
-                f"{metric_label}: " + "%{customdata[0]}"
+                "<b>%{x|%b %Y}</b><br>"
+                "Faturamento: %{customdata}"
                 "<extra></extra>"
             ),
-            name=metric_label,
+            name="Faturamento",
         )
     )
 
-    apply_layout(fig, f"Evolução Mensal de {metric_label}", height=390)
+    apply_layout(fig, "Evolução mensal do faturamento", height=285)
 
-    fig.update_xaxes(tickformat="%m/%Y")
-    fig.update_yaxes(
-        title_text=f"{metric_label} em milhões",
-        tickprefix="R$ ",
-        ticksuffix=" mi",
-        tickformat=".1f",
-        rangemode="tozero",
-    )
-
-    st.plotly_chart(
-        fig,
-        width="stretch",
-        config={"displayModeBar": False, "responsive": True},
-    )
-
-
-def render_dimension_chart(
-    chart_df: pd.DataFrame,
-    dimension_label: str,
-    metric_label: str,
-    title: str,
-) -> None:
-    if chart_df is None or chart_df.empty:
-        st.info(f"Não há dados suficientes para montar o ranking por {dimension_label}.")
-        return
-
-    df_plot = chart_df.copy()
-
-    if "dimensao" not in df_plot.columns or "valor" not in df_plot.columns:
-        st.info("As colunas necessárias para o gráfico dinâmico não foram encontradas.")
-        return
-
-    df_plot = prepare_numeric_column(df_plot, "valor")
-    df_plot["dimensao"] = df_plot["dimensao"].fillna("Não informado").astype(str)
-    df_plot = df_plot[df_plot["valor"] > 0].sort_values("valor", ascending=True)
-
-    if df_plot.empty:
-        st.info(f"Não há valores válidos para montar o ranking por {dimension_label}.")
-        return
-
-    df_plot = add_value_columns(df_plot, "valor")
-
-    fig = go.Figure()
-
-    fig.add_trace(
-        go.Bar(
-            x=df_plot["valor_milhoes"],
-            y=df_plot["dimensao"],
-            orientation="h",
-            marker=dict(color="#38BDF8", opacity=0.9),
-            text=df_plot["label"],
-            textposition="auto",
-            customdata=df_plot[["label"]],
-            hovertemplate=(
-                "<b>%{y}</b><br>"
-                f"{metric_label}: " + "%{customdata[0]}"
-                "<extra></extra>"
-            ),
-        )
-    )
-
-    apply_layout(fig, title, height=410)
-
+    periods = pd.to_datetime(chart_df["periodo"])
+    month_names = ("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
+    tick_labels = [f"{month_names[value.month - 1]} {value.year}" for value in periods]
     fig.update_xaxes(
-        title_text=f"{metric_label} em milhões",
-        tickprefix="R$ ",
-        ticksuffix=" mi",
-        tickformat=".1f",
-        rangemode="tozero",
+        tickmode="array",
+        tickvals=periods,
+        ticktext=tick_labels,
+        showgrid=False,
+        zeroline=False,
+        color="#CBD5E1",
+        tickfont=dict(size=11),
     )
-
-    fig.update_yaxes(title_text=dimension_label)
+    if log_scale:
+        tick_values, tick_labels = _log_currency_ticks(chart_df["faturamento"])
+        fig.update_yaxes(
+            type="log",
+            tickvals=tick_values,
+            ticktext=tick_labels,
+            title=dict(text="Receita (R$ · escala log)", font=dict(size=10, color="#9FB4D8")),
+        )
+    else:
+        fig.update_yaxes(tickformat="~s", title=dict(text="Receita (R$)", font=dict(size=10, color="#9FB4D8")))
 
     st.plotly_chart(
         fig,
@@ -239,108 +174,44 @@ def render_dimension_chart(
     )
 
 
-def render_legacy_store_chart(chart_df: pd.DataFrame, metric_label: str = "Métrica") -> None:
+def render_store_chart(chart_df: pd.DataFrame, compact=False):
     if chart_df is None or chart_df.empty:
-        st.info("Não há dados suficientes para montar a dimensão principal.")
+        st.warning("Não há dados válidos para montar o gráfico por loja.")
         return
 
-    df_plot = chart_df.copy()
-
-    if "loja" not in df_plot.columns or "faturamento" not in df_plot.columns:
-        st.info("As colunas necessárias para o gráfico legado não foram encontradas.")
-        return
-
-    df_plot = df_plot.rename(columns={"loja": "dimensao", "faturamento": "valor"})
-
-    render_dimension_chart(
-        chart_df=df_plot,
-        dimension_label="Dimensão Principal",
-        metric_label=metric_label,
-        title="Ranking por Dimensão Principal",
-    )
-
-
-def render_legacy_products_chart(chart_df: pd.DataFrame, metric_label: str = "Métrica") -> None:
-    if chart_df is None or chart_df.empty:
-        st.info("Não há dados suficientes para montar a dimensão secundária.")
-        return
-
-    df_plot = chart_df.copy()
-
-    if "produto" not in df_plot.columns or "faturamento" not in df_plot.columns:
-        st.info("As colunas necessárias para o gráfico legado não foram encontradas.")
-        return
-
-    df_plot = df_plot.rename(columns={"produto": "dimensao", "faturamento": "valor"})
-
-    render_dimension_chart(
-        chart_df=df_plot,
-        dimension_label="Dimensão Secundária",
-        metric_label=metric_label,
-        title="Ranking por Dimensão Secundária",
-    )
-
-
-def render_category_donut_chart(chart_df: pd.DataFrame, metric_label: str = "Métrica") -> None:
-    if chart_df is None or chart_df.empty:
-        return
-
-    df_plot = chart_df.copy()
-
-    if "categoria" not in df_plot.columns or "faturamento" not in df_plot.columns:
-        return
-
-    df_plot = prepare_numeric_column(df_plot, "faturamento")
-    df_plot["categoria"] = df_plot["categoria"].fillna("Não informado").astype(str)
-    df_plot = df_plot[df_plot["faturamento"] > 0].sort_values(
-        "faturamento",
-        ascending=False,
-    )
-
-    if df_plot.empty:
-        return
-
-    invalid_categories = {"sem categoria", "não informado", "nao informado", "none", "nan"}
-
-    unique_categories = {
-        str(value).strip().lower()
-        for value in df_plot["categoria"].dropna().unique().tolist()
-    }
-
-    if len(unique_categories) <= 1 and unique_categories.intersection(invalid_categories):
-        st.info("Categoria não encontrada na planilha. O gráfico de participação foi ocultado.")
-        return
-
-    total = df_plot["faturamento"].sum()
-
-    if total <= 0:
-        return
-
-    df_plot["participacao"] = df_plot["faturamento"] / total * 100
-    df_plot["valor_formatado"] = df_plot["faturamento"].apply(format_currency)
-    df_plot["participacao_formatada"] = df_plot["participacao"].apply(format_percent)
-
-    fig = px.pie(
-        df_plot,
-        values="faturamento",
-        names="categoria",
-        hole=0.55,
-        custom_data=["valor_formatado", "participacao_formatada"],
+    fig = px.bar(
+        chart_df,
+        x="faturamento",
+        y="loja",
+        orientation="h",
+        text="faturamento",
     )
 
     fig.update_traces(
-        textinfo="percent+label",
-        insidetextfont=dict(color="white"),
-        hovertemplate=(
-            "<b>%{label}</b><br>"
-            f"{metric_label}: " + "%{customdata[0]}<br>"
-            "Participação: %{customdata[1]}"
-            "<extra></extra>"
-        ),
-        marker=dict(line=dict(color="#020617", width=1)),
+        marker_color="#7DD3FC",
+        marker_line_width=0,
+        opacity=0.96,
+        texttemplate=(chart_df["faturamento"].map(_compact_currency).tolist() if compact else "R$ %{text:,.0f}"),
+        textposition="auto" if compact else "outside",
+        textfont=dict(size=10, color="#F4F8FF"),
+        cliponaxis=False,
+        customdata=chart_df["faturamento"].map(moeda),
+        hovertemplate="<b>%{y}</b><br>Faturamento: %{customdata}<extra></extra>",
     )
 
-    apply_layout(fig, "Participação por Categoria", height=390)
+    title = "Faturamento por loja · escala log" if compact else "Faturamento por loja"
+    apply_layout(fig, title, height=285 if compact else 390)
+    if compact:
+        ticks, labels = _log_currency_ticks(chart_df["faturamento"])
+        fig.update_xaxes(
+            type="log",
+            tickvals=ticks,
+            ticktext=labels,
+            title=dict(text="Receita (R$ · escala log)", font=dict(size=10, color="#9FB4D8")),
+        )
+    else:
+        fig.update_xaxes(tickprefix="R$ ", tickformat="~s", title=None)
+    fig.update_yaxes(title=None)
 
     st.plotly_chart(
         fig,
@@ -349,70 +220,84 @@ def render_category_donut_chart(chart_df: pd.DataFrame, metric_label: str = "Mé
     )
 
 
-def get_charts_payload(df=None, metricas=None) -> dict:
+def render_products_chart(chart_df: pd.DataFrame):
+    if chart_df is None or chart_df.empty:
+        st.warning("Não há dados válidos para montar o gráfico de produtos.")
+        return
+
+    fig = px.bar(
+        chart_df,
+        x="produto",
+        y="faturamento",
+        text="faturamento",
+    )
+
+    fig.update_traces(
+        marker_color="#60A5FA",
+        marker_line_width=0,
+        opacity=0.96,
+        texttemplate="R$ %{text:,.0f}",
+        textposition="outside",
+        hovertemplate="<b>%{x}</b><br>Faturamento: R$ %{y:,.0f}<extra></extra>",
+    )
+
+    fig.update_xaxes(tickangle=-8)
+
+    apply_layout(fig, "Top Produtos por Faturamento", height=370)
+
+    st.plotly_chart(
+        fig,
+        width="stretch",
+        config={"displayModeBar": False, "responsive": True},
+    )
+
+
+def get_charts_payload(df=None, metricas=None):
     if metricas and "charts" in metricas:
         return metricas["charts"]
 
     if df is not None:
-        return construir_analytics_state(df).get("charts", {})
+        return construir_analytics_state(df)["charts"]
 
     return {
         "revenue_by_month": pd.DataFrame(),
         "revenue_by_store": pd.DataFrame(),
         "top_products": pd.DataFrame(),
-        "revenue_by_category": pd.DataFrame(),
-        "primary_dimension_summary": pd.DataFrame(),
-        "secondary_dimension_summary": pd.DataFrame(),
     }
 
 
-def render_charts(df=None, metricas=None) -> None:
+def render_charts(df=None, metricas=None):
     charts = get_charts_payload(df=df, metricas=metricas)
 
-    metric_label = get_metric_label(metricas)
-    primary_dimension_label = get_primary_dimension_label(metricas)
-    secondary_dimension_label = get_secondary_dimension_label(metricas)
-
-    render_section_header()
+    st.markdown(
+        """
+<div class="section-header charts-section-header">
+    <div>
+        <div class="section-title">Análise Visual</div>
+        <div class="section-subtitle">Monitoramento analítico operacional em tempo real</div>
+    </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
     col1, col2 = st.columns(2)
 
     with col1:
         chart_container_start()
-        render_revenue_chart(
-            charts.get("revenue_by_month"),
-            metric_label=metric_label,
-        )
+        render_revenue_chart(charts.get("revenue_by_month"))
         chart_container_end()
 
     with col2:
         chart_container_start()
-        render_dimension_chart(
-            chart_df=charts.get("primary_dimension_summary"),
-            dimension_label=primary_dimension_label,
-            metric_label=metric_label,
-            title=f"Ranking por {primary_dimension_label}",
-        )
+        render_store_chart(charts.get("revenue_by_store"))
         chart_container_end()
 
     st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
     chart_container_start()
-    render_dimension_chart(
-        chart_df=charts.get("secondary_dimension_summary"),
-        dimension_label=secondary_dimension_label,
-        metric_label=metric_label,
-        title=f"Ranking por {secondary_dimension_label}",
-    )
+    render_products_chart(charts.get("top_products"))
     chart_container_end()
-
-    category_df = charts.get("revenue_by_category")
-
-    if category_df is not None and not category_df.empty:
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-        chart_container_start()
-        render_category_donut_chart(category_df, metric_label=metric_label)
-        chart_container_end()
 
 
 render_chart = render_charts
