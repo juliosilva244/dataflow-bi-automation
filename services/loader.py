@@ -18,6 +18,9 @@ from services.upload_security import read_limited_bytes, read_validated_content
 
 logger = get_logger(__name__)
 ROLLING_CALENDAR_DAYS = {"Últimos 7 dias": 7, "Últimos 30 dias": 30, "Últimos 90 dias": 90}
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DATA_PATH = PROJECT_ROOT / "data/raw/vendas.xlsx"
+DEMO_DATA_PATH = PROJECT_ROOT / "data/demo/vendas_demo.csv"
 
 __all__ = [
     "NULL_TEXT_VALUES",
@@ -98,10 +101,19 @@ def carregar_dados(
             filename = safe_filename
             content = read_limited_bytes(arquivo_upload, settings)
         else:
-            with open("data/raw/vendas.xlsx", "rb") as default_file:
-                content = read_limited_bytes(default_file, settings)
-            filename = "vendas.xlsx"
+            source_path = DEFAULT_DATA_PATH
             origem = "Arquivo padrão do sistema"
+            try:
+                default_file = source_path.open("rb")
+            except FileNotFoundError:
+                # Only absence selects the demo; invalid/inaccessible local data
+                # must still report its error instead of silently changing source.
+                source_path = DEMO_DATA_PATH
+                origem = "Demonstração — dados fictícios"
+                default_file = source_path.open("rb")
+            with default_file:
+                content = read_limited_bytes(default_file, settings)
+            filename = source_path.name
 
         signature = content_signature(content)
         limits = (
@@ -158,8 +170,13 @@ def carregar_dados(
 
     except FileNotFoundError as error:
         telemetry.record("carregamento", time.perf_counter() - load_started, failed=True)
-        logger.warning("Arquivo padrão ausente tipo=%s", type(error).__name__)
-        return None, None, "Arquivo padrão não encontrado em: data/raw/vendas.xlsx"
+        logger.warning("Arquivo de dados ausente tipo=%s", type(error).__name__)
+        return (
+            None,
+            None,
+            "Base operacional e base de demonstração não encontradas. "
+            "Envie um arquivo CSV ou XLSX pelo menu Dados.",
+        )
 
     except DataFlowError as error:
         telemetry.record("carregamento", time.perf_counter() - load_started, failed=True)

@@ -55,15 +55,25 @@ def no_external_client(monkeypatch):
         ("Configurações", "settings"),
     ],
 )
-def test_public_demo_routes(demo_frame, no_external_client, monkeypatch, page, navigation):
-    import app as application
+@pytest.mark.parametrize("entrypoint", ["app.py", "main.py"])
+def test_public_demo_routes(
+    no_external_client, monkeypatch, tmp_path, page, navigation, entrypoint,
+):
+    from services import loader
 
     monkeypatch.setattr(
-        application, "carregar_dados", lambda **kwargs: (demo_frame.copy(), "Demo sintética", None)
+        loader, "DEFAULT_DATA_PATH", tmp_path / "absent-operational.xlsx",
     )
-    app = AppTest.from_file(ROOT / "main.py").run(timeout=30)
+    app = AppTest.from_file(ROOT / entrypoint).run(timeout=30)
+    assert not app.exception
+    assert not app.error
+    assert app.session_state["performance_telemetry"].latest["normalizacao"]["rows"] == 720
     app.button(key=f"nav_{navigation}").click().run(timeout=30)
     assert not app.exception
+    assert not app.error
+    displayed = [item.value for item in app.markdown]
+    displayed.extend(item.proto.body for item in app.get("html"))
+    assert any("Demonstração — dados fictícios" in text for text in displayed)
     assert app.session_state["active_page"] == page
     assert app.session_state["ai_enabled"] is False
     assert not app.session_state["groq_api_key"]
